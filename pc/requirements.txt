@@ -1,0 +1,5 @@
+# App de piloteo (Python >= 3.10). Probado con pygame 2.6, OpenCV 4.10-5.0, numpy 2.x.
+pygame>=2.5,<3
+opencv-python>=4.8
+numpy>=1.24
+pyserial>=3.5

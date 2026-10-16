@@ -1,0 +1,22 @@
+# Entornos y cachés
+.venv/
+pc/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# PlatformIO / compilados
+firmware/.pio/
+firmware/test_host/build/
+firmware/test_host/vectors.txt
+
+# Datos locales de cada portátil
+pc/config.json
+pc/sesiones/
+
+# Editor / sistema
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.DS_Store
+*.swp

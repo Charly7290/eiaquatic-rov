@@ -1,0 +1,74 @@
+{
+  "puerto": "/dev/ttyUSB0",
+  "baudios": 115200,
+  "frecuencia_cmd_hz": 20,
+  "video": {
+    "dispositivo": 4,
+    "ancho": 720,
+    "alto": 576,
+    "fps": 25,
+    "fourcc": null
+  },
+  "carpeta_sesiones": "sesiones",
+  "grabar_al_inicio": true,
+  "potencia_inicial": 50,
+  "cabeceo_auto_inicial": true,
+  "mando": {
+    "zona_muerta": 0.12,
+    "expo": 1.6,
+    "joystick_generico": {
+      "ejes": {
+        "surge": [
+          1,
+          true
+        ],
+        "yaw": [
+          0,
+          false
+        ],
+        "vert": [
+          3,
+          true
+        ],
+        "pitch": null
+      },
+      "botones": {
+        "A": 0,
+        "B": 1,
+        "X": 2,
+        "Y": 3,
+        "LEFTSHOULDER": 4,
+        "RIGHTSHOULDER": 5,
+        "BACK": 6,
+        "START": 7
+      }
+    }
+  },
+  "deteccion": {
+    "ancho_trabajo": 640,
+    "cuadros_estable": 6,
+    "cubo": {
+      "activo": true,
+      "h_min": 2,
+      "h_max": 25,
+      "s_min": 110,
+      "v_min": 60,
+      "area_min": 120,
+      "solidez_min": 0.75,
+      "aspecto_max": 2.5
+    },
+    "moneda": {
+      "activo": true,
+      "radio_min": 3,
+      "radio_max": 40,
+      "param2": 18,
+      "contraste_min": 22
+    },
+    "generico": {
+      "activo": true,
+      "umbral": 45,
+      "area_min": 300,
+      "alargamiento_max": 4.0
+    }
+  }
+}

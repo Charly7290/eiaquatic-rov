@@ -1,0 +1,3 @@
+# Herramientas de desarrollo (las instala ./setup.sh en .venv junto con pc/requirements.txt)
+platformio>=6.1,<7      # compilar y cargar el firmware de la ESP32 desde la terminal (make bringup/rov)
+pytest>=8

@@ -1,0 +1,33 @@
+{
+  // Abrir con: code aquabot.code-workspace  (o File → Open Workspace from File)
+  // Tres carpetas para que PlatformIO encuentre firmware/platformio.ini y Python use el .venv de la raíz.
+  "folders": [
+    { "name": "AquaBot", "path": "." },
+    { "name": "firmware", "path": "firmware" },
+    { "name": "pc", "path": "pc" }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder:AquaBot}/.venv/bin/python",
+    "python.terminal.activateEnvironment": true,
+    "python.testing.pytestEnabled": true,
+    "python.testing.cwd": "${workspaceFolder:pc}",
+    "python.testing.pytestArgs": ["tests"],
+    "platformio-ide.useBuiltinPython": true,
+    "files.associations": { "*.ino": "cpp" },
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.pytest_cache": true
+    },
+    "search.exclude": {
+      "**/.venv": true,
+      "**/.pio": true,
+      "**/sesiones": true
+    },
+    "editor.rulers": [120],
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true
+  },
+  "extensions": {
+    "recommendations": ["platformio.platformio-ide", "ms-python.python"]
+  }
+}
