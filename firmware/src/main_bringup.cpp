@@ -222,7 +222,12 @@ void setup() {
 
   Serial.printf("\nMS5837: %s (CRC PROM %s)\n", b ? "OK" : "NO RESPONDE", baro.crcOk() ? "ok" : "MAL");
   Serial.printf("MPU6050: %s (WHO_AM_I 0x%02X)\n", m ? "OK" : "NO RESPONDE", imu.whoAmI());
-  Serial.printf("DS18B20: %d sensor(es)\n", ds18.getDeviceCount());
+  Serial.printf("DS18B20: %d sensor(es)", ds18.getDeviceCount());
+  if (ds18.getDeviceCount() > 0)
+    Serial.printf(" | alimentación: %s", ds18.isParasitePowerMode()
+                                            ? "PARÁSITA (VDD/rojo sin conectar a 3V3?)"
+                                            : "normal (VDD conectado)");
+  Serial.println();
   Serial.printf("Vbat: %.2f V | lastre LLENO=%d VACIO=%d\n", vbat(), limFull(), limEmpty());
   help();
 }
@@ -245,6 +250,8 @@ void loop() {
     tTemp = now;
     float t = ds18.getTempCByIndex(0);
     waterTemp = (t == DEVICE_DISCONNECTED_C) ? NAN : t;
+    // 85.00 = valor de encendido del DS18B20: no completó la conversión (falta de energía en VDD/pull-up).
+    if (t == 85.0f) Serial.println(F("  DS18B20 = 85.00: conversión incompleta. Revise VDD (rojo) a 3V3 y pull-up 4.7k dato-3V3."));
     ds18.requestTemperatures();
   }
   if (streaming && now - tStream >= 200) {

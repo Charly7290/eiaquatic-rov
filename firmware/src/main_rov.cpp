@@ -223,7 +223,9 @@ static void processPressure(uint32_t now) {
 static void readTemperature(uint32_t now) {
   if (now - tempReqMs < TEMP_PERIOD_MS) return;
   float t = ds18.getTempCByIndex(0);
-  tempOk = (t != DEVICE_DISCONNECTED_C) && t > -20.0f && t < 80.0f;
+  // 85.00 es el valor de encendido del DS18B20 (conversión no completada): no es una lectura válida.
+  // En el agua nunca se llega a 80 °C, así que el rango ya lo excluye; se deja explícito por claridad.
+  tempOk = (t != DEVICE_DISCONNECTED_C) && t != 85.0f && t > -20.0f && t < 80.0f;
   if (tempOk) waterTempC = t;
   ds18.requestTemperatures();  // no bloquea (setWaitForConversion(false))
   tempReqMs = now;

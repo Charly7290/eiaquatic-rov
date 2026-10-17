@@ -61,9 +61,11 @@ static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, +1, +1, +1, +1};
 // Ejes del cuerpo: X hacia adelante, Y hacia la izquierda, Z hacia arriba.
 // Cada entrada = {eje del sensor (0=x, 1=y, 2=z), signo}. Se verifica con el bring-up:
 // ROV nivelado -> az ≈ +1 g; nariz arriba -> pitch positivo; lado derecho abajo -> roll positivo.
-static const int8_t IMU_MAP_FWD[2]  = {0, +1};
-static const int8_t IMU_MAP_LEFT[2] = {1, +1};
-static const int8_t IMU_MAP_UP[2]   = {2, +1};
+// Montaje en el ROV (16 oct): +Z del sensor hacia la proa, +X hacia arriba, Y hacia los lados.
+// LEFT sale de la regla de la mano derecha: izquierda = arriba × adelante = X × Z = −Y.
+static const int8_t IMU_MAP_FWD[2]  = {2, +1};
+static const int8_t IMU_MAP_LEFT[2] = {1, -1};
+static const int8_t IMU_MAP_UP[2]   = {0, +1};
 
 // ---------------------------------------------------------------- Tiempos
 #define CONTROL_PERIOD_MS   20    // 50 Hz
