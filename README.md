@@ -138,7 +138,10 @@ make sim ARGS="--video ruta/camara_01.mp4"    # calibrar la detección con un vi
 | — | F2 | Parámetros del ROV (↑↓ ←→, Shift ×10, Ctrl+S guarda en flash) |
 | — | F3 | Ajuste de visión (Tab cambia máscara, Ctrl+S guarda en config.json) |
 | — | F5 | Grabar / detener |
+| — | F11 | Pantalla completa / ventana |
 | — | ESC ×2 | Salir (desarma) |
+
+La ventana mide 1600×960 (es lo que se graba). Si la pantalla es más pequeña se escala sola; F11 la pone en pantalla completa. La tipografía (Barlow, licencia OFL) va incluida en `pc/aquabot_pc/assets/fonts/`.
 
 **Marca de detección (#28).** Al pulsar A, la marca queda registrada de tres formas a la vez:
 - un banner rojo con número, clase y hora en milisegundos, por 3 s;

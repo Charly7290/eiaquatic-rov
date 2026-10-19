@@ -1,17 +1,21 @@
-"""Dibujo de la ventana de piloteo (1280×768).
+"""Interfaz de piloteo EIAquatic (1600×960, se graba tal cual).
 
-┌──────────────────────── video 960×720 ────────────┬──── panel 320 ────┐
-│ contornos de detección, mira, banner de hallazgo   │ ROI + estado      │
-│                                                    │ telemetría        │
-├────────────────────────────────────────────────────┴───────────────────┤
-│ reloj ms · REC · armado · modos · potencia · avisos · motores         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌ EIAquatic | Piloto ROV ────────────────────────────────────────────────────────┐
+│ ┌────────────── video 4:3 ──────────────┐  ┌ Detección ──────────────────────┐ │
+│ │ banner de hallazgo / temperatura       │  │ Profundidad                     │ │
+│ │ contornos · mira · mensajes            │  │ Temp. agua │ Batería            │ │
+│ │                                        │  │ Actitud · cabeceo               │ │
+│ └────────────────────────────────────────┘  └ Lastre ─────────────────────────┘ │
+│ reloj ms │ REC │ ARMADO │ POT │ ENLACE │ avisos                MOTORES M1…M5     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+Contornos: visto = línea delgada blanca + etiqueta pequeña · candidato = amarillo · confirmado = rojo.
 """
 from __future__ import annotations
 
 import math
 import time
 from datetime import datetime
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -20,26 +24,44 @@ import pygame
 from . import protocol as P
 from .detection import TUNABLE
 
-W, H = 1280, 768
-VW, VH = 960, 720
-PX = VW  # x del panel derecho
-PW = W - VW
+# ------------------------------------------------------------------ geometría
+W, H = 1600, 960
+HDR, FTR, M, G = 56, 68, 16, 10          # alto cabecera, alto barra inferior, margen, separación
+RPW = 440                                 # ancho del panel derecho
+RPX = W - M - RPW                         # x del panel derecho
+TOP, BOT = HDR + 12, H - FTR - 12         # zona útil vertical
+_avail_w = RPX - 2 * M
+VH = BOT - TOP
+VW = min(_avail_w, VH * 4 // 3)
+VX = M + (_avail_w - VW) // 2
+VY = TOP
+VIDEO = pygame.Rect(VX, VY, VW, VH)
 
-BG = (14, 17, 22)
-PANEL = (22, 27, 34)
-LINE = (48, 54, 61)
-TEXT = (230, 237, 243)
-MUTED = (139, 148, 158)
-ORANGE = (242, 140, 40)
-GREEN = (63, 185, 80)
-YELLOW = (210, 153, 34)
-RED = (248, 81, 73)
-CYAN = (57, 197, 207)
+# ------------------------------------------------------------------ colores
+BG = (9, 19, 30)
+BAR = (8, 16, 26)
+CARD = (14, 29, 44)
+CARD_BORDER = (29, 49, 68)
+TRACK = (37, 55, 74)
+LINE = (40, 62, 84)
+TEXT = (232, 240, 247)
+MUTED = (134, 155, 176)
+CYAN = (34, 197, 230)
+GREEN = (34, 197, 94)
+YELLOW = (234, 179, 8)
+RED = (239, 68, 68)
+BLUE = (59, 130, 246)
+ORANGE = (249, 115, 22)
+SKY = (47, 128, 214)
+GROUND = (168, 105, 46)
+
+FONT_DIR = Path(__file__).resolve().parent / "assets" / "fonts"
+_NO_GLYPH = set("✓▲▼■↑↓←→")
 
 
-def _font(size: int, mono: bool = False, bold: bool = False) -> pygame.font.Font:
-    names = "dejavusansmono,consolas,menlo,monospace" if mono else "dejavusans,segoeui,arial,helvetica"
-    return pygame.font.SysFont(names, size, bold=bold)
+def mix(a, b, t: float):
+    """Mezcla de colores: t=0 -> a, t=1 -> b."""
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
 def clock_str() -> str:
@@ -49,59 +71,217 @@ def clock_str() -> str:
 class UI:
     def __init__(self, screen: pygame.Surface) -> None:
         self.screen = screen
-        self.f_small = _font(13)
-        self.f_norm = _font(16)
-        self.f_bold = _font(16, bold=True)
-        self.f_big = _font(26, bold=True)
-        self.f_huge = _font(34, bold=True)
-        self.f_mono = _font(22, mono=True, bold=True)
-        self.f_mono_s = _font(14, mono=True)
-        self.f_banner = _font(28, bold=True)
+        self._fonts: dict = {}
+        self._icons: dict = {}
+        self._mask = self._video_mask()
+        self._errs = 0
+        self._err_t = -99.0
 
-    # ----------------------------------------------------------------- utilidades
-    def text(self, s: str, pos, font=None, color=TEXT, anchor: str = "topleft") -> pygame.Rect:
-        surf = (font or self.f_norm).render(s, True, color)
+    # ================================================================== utilidades
+    def font(self, size: int, weight: str = "Regular") -> pygame.font.Font:
+        key = (size, weight)
+        if key not in self._fonts:
+            path = FONT_DIR / f"Barlow-{weight}.ttf"
+            if path.exists():
+                self._fonts[key] = pygame.font.Font(str(path), size)
+            else:  # respaldo si faltan los archivos
+                self._fonts[key] = pygame.font.SysFont("dejavusans,arial", size,
+                                                       bold=weight in ("SemiBold", "Bold"))
+        return self._fonts[key]
+
+    def text(self, s: str, pos, size: int = 16, weight: str = "Regular", color=TEXT,
+             anchor: str = "topleft") -> pygame.Rect:
+        f = self.font(size, weight)
+        if any(ch in _NO_GLYPH for ch in s):  # Barlow no trae flechas ni ✓: se usa DejaVu
+            key = ("fallback", size, weight)
+            if key not in self._fonts:
+                self._fonts[key] = pygame.font.SysFont("dejavusans,arial", size, bold=weight in ("SemiBold", "Bold"))
+            f = self._fonts[key]
+        surf = f.render(s, True, color)
         r = surf.get_rect(**{anchor: pos})
         self.screen.blit(surf, r)
         return r
 
-    def pill(self, s: str, x: int, y: int, bg, fg=TEXT) -> int:
-        surf = self.f_bold.render(s, True, fg)
-        r = pygame.Rect(x, y, surf.get_width() + 16, 26)
-        pygame.draw.rect(self.screen, bg, r, border_radius=13)
-        self.screen.blit(surf, surf.get_rect(center=r.center))
-        return r.right + 8
+    def mono(self, s: str, pos, size: int, weight: str, color) -> pygame.Rect:
+        """Texto con dígitos de ancho fijo (el reloj no 'baila')."""
+        f = self.font(size, weight)
+        cw = f.size("0")[0]
+        x, y = pos
+        x0 = x
+        for ch in s:
+            g = f.render(ch, True, color)
+            w = cw if ch.isdigit() else g.get_width()
+            self.screen.blit(g, (x + (w - g.get_width()) // 2, y))
+            x += w
+        return pygame.Rect(x0, y, x - x0, f.get_height())
 
-    def bar(self, rect: pygame.Rect, frac: float, color, center: bool = False) -> None:
-        pygame.draw.rect(self.screen, (40, 46, 54), rect, border_radius=3)
-        if center:  # barra bipolar -1..1
-            mid = rect.x + rect.w // 2
-            w = int(rect.w / 2 * max(-1.0, min(1.0, frac)))
-            r = pygame.Rect(min(mid, mid + w), rect.y, abs(w), rect.h)
-            pygame.draw.line(self.screen, LINE, (mid, rect.y), (mid, rect.bottom - 1))
+    def rrect(self, rect, color, radius: int = 10, width: int = 0) -> None:
+        pygame.draw.rect(self.screen, color, rect, width, border_radius=radius)
+
+    def chip(self, s: str, pos: tuple, color, align: str = "left", filled: bool = False) -> pygame.Rect:
+        f = self.font(14, "SemiBold")
+        tw = f.size(s)[0]
+        w, h = tw + 24, 28
+        x, y = pos
+        r = pygame.Rect(x - w if align == "right" else x, y, w, h)
+        if filled:
+            self.rrect(r, color, h // 2)
+            self.text(s, r.center, 14, "SemiBold", (10, 14, 20), "center")
         else:
-            r = pygame.Rect(rect.x, rect.y, int(rect.w * max(0.0, min(1.0, frac))), rect.h)
-        if r.w > 0:
-            pygame.draw.rect(self.screen, color, r, border_radius=3)
+            self.rrect(r, mix(CARD, color, 0.16), h // 2)
+            self.rrect(r, mix(CARD, color, 0.7), h // 2, 1)
+            self.text(s, r.center, 14, "SemiBold", color, "center")
+        return r
 
-    # ----------------------------------------------------------------- dibujo
+    def card(self, rect: pygame.Rect, icon: str, title: str) -> int:
+        self.rrect(rect, CARD, 12)
+        self.rrect(rect, CARD_BORDER, 12, 1)
+        self.icon(icon, (rect.x + 16, rect.y + 15), 22, CYAN)
+        self.text(title, (rect.x + 48, rect.y + 26), 16, "SemiBold", TEXT, "midleft")
+        return rect.y + 48
+
+    def _video_mask(self) -> pygame.Surface:
+        """Capa que redondea las esquinas del video (fondo opaco con hueco transparente)."""
+        m = pygame.Surface(VIDEO.size, pygame.SRCALPHA)
+        m.fill((*BG, 255))
+        pygame.draw.rect(m, (0, 0, 0, 0), m.get_rect(), border_radius=12)
+        return m
+
+    # ================================================================== iconos
+    def icon(self, name: str, pos, size: int, color) -> None:
+        key = (name, size, color)
+        if key not in self._icons:
+            s = 4  # se dibuja a 4x y se reduce: bordes suaves
+            n = size * s
+            surf = pygame.Surface((n, n), pygame.SRCALPHA)
+            getattr(self, "_ic_" + name)(surf, n, color, max(2, int(n * 0.085)))
+            self._icons[key] = pygame.transform.smoothscale(surf, (size, size))
+        self.screen.blit(self._icons[key], pos)
+
+    @staticmethod
+    def _wave(surf, n, color, lw, y, amp, periods=1.5, x0=0.08, x1=0.92):
+        pts = [(n * (x0 + (x1 - x0) * i / 40), y + amp * math.sin(2 * math.pi * periods * i / 40)) for i in range(41)]
+        pygame.draw.lines(surf, color, False, pts, lw)
+
+    def _ic_waves(self, surf, n, c, lw):
+        for yy in (0.3, 0.5, 0.7):
+            self._wave(surf, n, c, lw, n * yy, n * 0.06)
+
+    def _ic_logo(self, surf, n, c, lw):
+        for yy in (0.32, 0.52, 0.72):
+            self._wave(surf, n, c, int(lw * 1.6), n * yy, n * 0.08, 1.25)
+
+    def _ic_target(self, surf, n, c, lw):
+        cx = cy = n // 2
+        pygame.draw.circle(surf, c, (cx, cy), int(n * 0.32), lw)
+        pygame.draw.circle(surf, c, (cx, cy), int(n * 0.08))
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            pygame.draw.line(surf, c, (cx + dx * n * 0.36, cy + dy * n * 0.36),
+                             (cx + dx * n * 0.48, cy + dy * n * 0.48), lw)
+
+    def _ic_thermo(self, surf, n, c, lw):
+        pygame.draw.rect(surf, c, (n * 0.4, n * 0.06, n * 0.2, n * 0.6), lw, border_radius=int(n * 0.1))
+        pygame.draw.circle(surf, c, (n // 2, int(n * 0.76)), int(n * 0.16), lw)
+        pygame.draw.circle(surf, c, (n // 2, int(n * 0.76)), int(n * 0.08))
+        pygame.draw.line(surf, c, (n * 0.5, n * 0.35), (n * 0.5, n * 0.68), lw)
+
+    def _ic_battery(self, surf, n, c, lw):
+        pygame.draw.rect(surf, c, (n * 0.06, n * 0.28, n * 0.78, n * 0.44), lw, border_radius=int(n * 0.06))
+        pygame.draw.rect(surf, c, (n * 0.86, n * 0.4, n * 0.08, n * 0.2))
+        pygame.draw.rect(surf, c, (n * 0.16, n * 0.38, n * 0.3, n * 0.24))
+
+    def _ic_attitude(self, surf, n, c, lw):
+        cx = cy = n // 2
+        pygame.draw.circle(surf, c, (cx, cy), int(n * 0.4), lw)
+        pygame.draw.line(surf, c, (n * 0.18, n * 0.56), (n * 0.82, n * 0.44), lw)
+        pygame.draw.circle(surf, c, (cx, cy), int(n * 0.07))
+
+    def _ic_drop(self, surf, n, c, lw):
+        cx = n / 2
+        arc = [(cx + n * 0.27 * math.cos(math.radians(i)), n * 0.62 + n * 0.27 * math.sin(math.radians(i)))
+               for i in range(0, 181, 10)]
+        pygame.draw.polygon(surf, c, [(cx, n * 0.08)] + arc, lw)
+
+    def _ic_gauge(self, surf, n, c, lw):
+        r = pygame.Rect(n * 0.08, n * 0.18, n * 0.84, n * 0.84)
+        pygame.draw.arc(surf, c, r, 0, math.pi, lw)
+        cx, cy = r.centerx, r.centery
+        pygame.draw.line(surf, c, (cx, cy), (cx + n * 0.24, cy - n * 0.22), lw)
+        pygame.draw.circle(surf, c, (cx, cy), int(n * 0.07))
+
+    def _ic_clock(self, surf, n, c, lw):
+        cx = cy = n // 2
+        pygame.draw.circle(surf, c, (cx, cy), int(n * 0.42), lw)
+        pygame.draw.line(surf, c, (cx, cy), (cx, cy - n * 0.26), lw)
+        pygame.draw.line(surf, c, (cx, cy), (cx + n * 0.18, cy + n * 0.08), lw)
+
+    def _ic_shield(self, surf, n, c, lw):
+        pts = [(n * 0.5, n * 0.06), (n * 0.86, n * 0.2), (n * 0.82, n * 0.56), (n * 0.5, n * 0.94),
+               (n * 0.18, n * 0.56), (n * 0.14, n * 0.2)]
+        pygame.draw.polygon(surf, c, pts, lw)
+        pygame.draw.lines(surf, c, False, [(n * 0.34, n * 0.5), (n * 0.46, n * 0.62), (n * 0.68, n * 0.38)], lw)
+
+    def _ic_bolt(self, surf, n, c, lw):
+        pts = [(n * 0.58, n * 0.04), (n * 0.2, n * 0.56), (n * 0.48, n * 0.56), (n * 0.4, n * 0.96),
+               (n * 0.8, n * 0.42), (n * 0.52, n * 0.42)]
+        pygame.draw.polygon(surf, c, pts, lw)
+
+    def _ic_signal(self, surf, n, c, lw):
+        for i, hh in enumerate((0.3, 0.55, 0.8)):
+            x = n * (0.14 + i * 0.28)
+            pygame.draw.rect(surf, c, (x, n * (0.9 - hh), n * 0.18, n * hh), border_radius=int(n * 0.04))
+
+    def _ic_image(self, surf, n, c, lw):
+        pygame.draw.rect(surf, c, (n * 0.08, n * 0.16, n * 0.84, n * 0.68), lw, border_radius=int(n * 0.08))
+        pygame.draw.lines(surf, c, False, [(n * 0.14, n * 0.76), (n * 0.38, n * 0.48), (n * 0.56, n * 0.66),
+                                           (n * 0.68, n * 0.54), (n * 0.86, n * 0.74)], lw)
+        pygame.draw.circle(surf, c, (int(n * 0.66), int(n * 0.36)), int(n * 0.07), lw)
+
+    def _ic_check(self, surf, n, c, lw):
+        pygame.draw.lines(surf, c, False, [(n * 0.14, n * 0.52), (n * 0.4, n * 0.78), (n * 0.88, n * 0.24)],
+                          int(lw * 1.5))
+
+    def _ic_up(self, surf, n, c, lw):
+        pygame.draw.line(surf, c, (n / 2, n * 0.15), (n / 2, n * 0.88), lw)
+        pygame.draw.lines(surf, c, False, [(n * 0.22, n * 0.42), (n / 2, n * 0.15), (n * 0.78, n * 0.42)], lw)
+
+    def _ic_down(self, surf, n, c, lw):
+        pygame.draw.line(surf, c, (n / 2, n * 0.12), (n / 2, n * 0.85), lw)
+        pygame.draw.lines(surf, c, False, [(n * 0.22, n * 0.58), (n / 2, n * 0.85), (n * 0.78, n * 0.58)], lw)
+
+    # ================================================================== dibujo
     def draw(self, app) -> None:
         self.screen.fill(BG)
+        self._header(app)
         self._video(app)
         self._right_panel(app)
-        self._bottom_bar(app)
+        self._footer(app)
         if app.panel == "params":
             self._params_panel(app)
         elif app.panel == "vision":
             self._vision_panel(app)
         self._banner_and_toast(app)
 
+    # ------------------------------------------------------------------ cabecera
+    def _header(self, app) -> None:
+        pygame.draw.rect(self.screen, BAR, (0, 0, W, HDR))
+        pygame.draw.line(self.screen, CARD_BORDER, (0, HDR - 1), (W, HDR - 1))
+        self.icon("logo", (M + 4, 12), 32, CYAN)
+        r = self.text("EIAquatic", (M + 48, HDR // 2), 26, "Bold", TEXT, "midleft")
+        pygame.draw.line(self.screen, LINE, (r.right + 18, 16), (r.right + 18, HDR - 16), 1)
+        self.text("Piloto ROV", (r.right + 36, HDR // 2), 18, "Regular", MUTED, "midleft")
+        if app.sim is not None:
+            self.chip("SIMULADOR", (W - M, 14), YELLOW, "right")
+
+    # ------------------------------------------------------------------ video
     def _video(self, app) -> None:
         frame = app.frame
         if frame is None:
-            pygame.draw.rect(self.screen, (8, 10, 13), (0, 0, VW, VH))
-            self.text("SIN VIDEO", (VW // 2, VH // 2 - 20), self.f_huge, MUTED, "center")
-            self.text(app.video_status, (VW // 2, VH // 2 + 20), self.f_norm, MUTED, "center")
+            self.rrect(VIDEO, (5, 10, 16), 12)
+            self.icon("image", (VIDEO.centerx - 32, VIDEO.centery - 70), 64, MUTED)
+            self.text("SIN VIDEO", (VIDEO.centerx, VIDEO.centery + 14), 34, "SemiBold", MUTED, "center")
+            self.text(app.video_status, (VIDEO.centerx, VIDEO.centery + 50), 18, "Regular", MUTED, "center")
+            self.rrect(VIDEO, CARD_BORDER, 12, 1)
             return
         fh, fw = frame.shape[:2]
         sx, sy = VW / fw, VH / fh
@@ -118,194 +298,314 @@ class UI:
         for t in app.tracks:
             cnt = (t.contour.astype(np.float32) * (sx, sy)).astype(np.int32)
             confirmed = t.id in app.confirmed_ids
+            x, y, w, h = cv2.boundingRect(cnt)
             if confirmed:
-                color, thick = (60, 60, 255), 4
+                color, thick = (68, 68, 239), 4            # rojo (BGR)
             elif t.stable:
-                color, thick = (0, 220, 255), 3  # amarillo = candidato
+                color, thick = (8, 179, 234), 3            # amarillo = candidato
             else:
-                color, thick = t.color, 1
+                color, thick = (235, 235, 235), 1          # visto: blanco delgado, igual para todo
             cv2.drawContours(vis, [cnt], -1, color, thick, cv2.LINE_AA)
             if t.stable or confirmed:
-                x, y, w, h = cv2.boundingRect(cnt)
-                cv2.rectangle(vis, (x - 4, y - 4), (x + w + 4, y + h + 4), color, 1, cv2.LINE_AA)
-                labels.append((t, x, y, confirmed))
+                cv2.rectangle(vis, (x - 5, y - 5), (x + w + 5, y + h + 5), color, 1, cv2.LINE_AA)
+            labels.append((t, x, y, confirmed))
 
         cx, cy = VW // 2, VH // 2  # mira
-        cv2.line(vis, (cx - 18, cy), (cx - 6, cy), (230, 230, 230), 1, cv2.LINE_AA)
-        cv2.line(vis, (cx + 6, cy), (cx + 18, cy), (230, 230, 230), 1, cv2.LINE_AA)
-        cv2.line(vis, (cx, cy - 18), (cx, cy - 6), (230, 230, 230), 1, cv2.LINE_AA)
-        cv2.line(vis, (cx, cy + 6), (cx, cy + 18), (230, 230, 230), 1, cv2.LINE_AA)
+        for a, b in (((-22, 0), (-7, 0)), ((7, 0), (22, 0)), ((0, -22), (0, -7)), ((0, 7), (0, 22))):
+            cv2.line(vis, (cx + a[0], cy + a[1]), (cx + b[0], cy + b[1]), (240, 240, 240), 2, cv2.LINE_AA)
 
         rgb = cv2.cvtColor(vis, cv2.COLOR_BGR2RGB)
-        self.screen.blit(pygame.image.frombuffer(rgb.tobytes(), (VW, VH), "RGB"), (0, 0))
+        self.screen.blit(pygame.image.frombuffer(rgb.tobytes(), (VW, VH), "RGB"), VIDEO.topleft)
         for t, x, y, confirmed in labels:
-            txt = ("✓ " if confirmed else "") + t.label
-            col = RED if confirmed else YELLOW
-            surf = self.f_bold.render(txt, True, (0, 0, 0))
-            r = surf.get_rect(bottomleft=(x - 4, max(22, y - 6)))
-            pygame.draw.rect(self.screen, col, r.inflate(8, 4), border_radius=3)
-            self.screen.blit(surf, r)
+            x += VX
+            y += VY
+            if confirmed or t.stable:
+                col = RED if confirmed else YELLOW
+                fg = (255, 255, 255) if confirmed else (10, 14, 20)
+                surf = self.font(15, "Bold").render(t.label, True, fg)
+                iw = 20 if confirmed else 0
+                r = surf.get_rect(bottomleft=(x - 5 + iw, max(VY + 24, y - 8)))
+                bg = pygame.Rect(r.x - iw, r.y, r.w + iw, r.h).inflate(12, 6)
+                self.rrect(bg, col, 4)
+                if confirmed:
+                    self.icon("check", (r.x - iw, r.centery - 8), 16, fg)
+                self.screen.blit(surf, r)
+            else:  # etiqueta pequeña y discreta
+                surf = self.font(13, "SemiBold").render(t.label.lower(), True, (240, 240, 240))
+                r = surf.get_rect(bottomleft=(x, max(VY + 18, y - 5)))
+                bg = pygame.Surface(r.inflate(10, 4).size, pygame.SRCALPHA)
+                bg.fill((0, 0, 0, 150))
+                self.screen.blit(bg, r.inflate(10, 4))
+                self.screen.blit(surf, r)
+        self.screen.blit(self._mask, VIDEO.topleft)
+        self.rrect(VIDEO, CARD_BORDER, 12, 1)
 
-    def _section(self, title: str, y: int) -> int:
-        self.text(title, (PX + 14, y), self.f_small, MUTED)
-        pygame.draw.line(self.screen, LINE, (PX + 14, y + 18), (W - 14, y + 18))
-        return y + 26
+    # ------------------------------------------------------------------ panel derecho
+    @staticmethod
+    def _mode(requested: bool, active: bool, waiting_for: str):
+        """Modo pedido por el piloto vs. confirmado por el ROV."""
+        if requested and active:
+            return "AUTO", GREEN
+        if requested:
+            return f"AUTO · espera {waiting_for}", YELLOW
+        return "MANUAL", MUTED
 
     def _right_panel(self, app) -> None:
-        pygame.draw.rect(self.screen, PANEL, (PX, 0, PW, VH))
-        y = self._section("DETECCIÓN", 8)
+        x, w = RPX, RPW
+        t: P.Telemetry | None = app.link.telemetry
+        stale = t is None or not app.link.ok
 
-        # ROI
-        box = pygame.Rect(PX + 14, y, PW - 28, 200)
-        pygame.draw.rect(self.screen, (8, 10, 13), box)
+        def dim(c):
+            return MUTED if stale else c
+
+        heights = [216, 128, 112, 158]
+        heights.append(BOT - TOP - sum(heights) - G * 4)
+        ys = [TOP]
+        for hh in heights[:-1]:
+            ys.append(ys[-1] + hh + G)
+
+        # ---------------------------------------------------------- DETECCIÓN
+        rect = pygame.Rect(x, ys[0], w, heights[0])
+        cy = self.card(rect, "target", "DETECCIÓN")
+        n = app.session.n_detections
+        self.text(f"{n} hallazgo{'s' if n != 1 else ''}", (rect.right - 16, rect.y + 26), 16, "Medium",
+                  RED if n else MUTED, "midright")
         roi, frozen = app.roi_display()
+        best = app.detector.best_candidate()
+        if frozen:
+            state, scol = "DETECTADO", RED
+        elif best is not None and best.stable:
+            state, scol = "CANDIDATO", YELLOW
+        else:
+            state, scol = "BUSCANDO", CYAN
+        self.chip(state, (rect.x + 172, rect.y + 12), scol)
+
+        box = pygame.Rect(rect.x + 14, cy, w - 28, heights[0] - 48 - 40)
+        self.rrect(box, (7, 16, 25), 8)
         if roi is not None and roi.size:
             rh, rw = roi.shape[:2]
-            k = min(box.w / rw, box.h / rh)
-            roi_r = cv2.resize(roi, (max(1, int(rw * k)), max(1, int(rh * k))), interpolation=cv2.INTER_NEAREST
-                               if k > 3 else cv2.INTER_LINEAR)
+            k = min((box.w - 6) / rw, (box.h - 6) / rh)
+            roi_r = cv2.resize(roi, (max(1, int(rw * k)), max(1, int(rh * k))),
+                               interpolation=cv2.INTER_NEAREST if k > 3 else cv2.INTER_LINEAR)
             rgb = cv2.cvtColor(roi_r, cv2.COLOR_BGR2RGB)
             surf = pygame.image.frombuffer(rgb.tobytes(), (rgb.shape[1], rgb.shape[0]), "RGB")
             self.screen.blit(surf, surf.get_rect(center=box.center))
         else:
-            self.text("sin objeto a la vista", box.center, self.f_small, MUTED, "center")
-        pygame.draw.rect(self.screen, RED if frozen else LINE, box, 3 if frozen else 1)
-        y = box.bottom + 8
-
+            self.icon("image", (box.centerx - 18, box.centery - 30), 36, MUTED)
+            self.text("Sin objeto a la vista", (box.centerx, box.centery + 20), 16, "Regular", MUTED, "center")
+        self.rrect(box, RED if frozen else CARD_BORDER, 8, 3 if frozen else 1)
+        ly = box.bottom + 20
         if frozen:
             info = app.last_confirm
-            self.text(f"● DETECTADO #{info['k']}", (PX + 14, y), self.f_big, RED)
-            self.text(f"{info['label']}  ·  {info['hora']}", (PX + 14, y + 32), self.f_norm, TEXT)
+            self.text(f"#{info['k']}  {info['label']}", (rect.x + 16, ly), 16, "SemiBold", RED, "midleft")
+            self.text(info["hora"], (rect.right - 16, ly), 16, "Medium", TEXT, "midright")
+        elif best is not None and best.stable:
+            self.text(best.label, (rect.x + 16, ly), 16, "SemiBold", YELLOW, "midleft")
+            self.text("pulse A para confirmar", (rect.right - 16, ly), 15, "Regular", TEXT, "midright")
         else:
-            best = app.detector.best_candidate()
-            if best is not None and best.stable:
-                self.text("CANDIDATO", (PX + 14, y), self.f_big, YELLOW)
-                self.text(f"{best.label}  ·  pulse A para confirmar", (PX + 14, y + 32), self.f_small, TEXT)
-            else:
-                self.text("Buscando…", (PX + 14, y), self.f_big, MUTED)
-        self.text(f"Hallazgos confirmados: {app.session.n_detections}", (PX + 14, y + 54), self.f_small, MUTED)
-        y += 80
-
-        # Telemetría
-        y = self._section("TELEMETRÍA", y)
-        t: P.Telemetry | None = app.link.telemetry
-        stale = not app.link.ok
-
-        def val(s, x, yy, font=None, color=TEXT):
-            self.text(s, (x, yy), font or self.f_bold, MUTED if stale else color)
+            self.text("la visión no ve nada estable", (rect.x + 16, ly), 15, "Regular", MUTED, "midleft")
 
         if t is None:
-            self.text("esperando al ROV…", (PX + 14, y + 4), self.f_norm, MUTED)
+            r = pygame.Rect(x, ys[1], w, BOT - ys[1])
+            self.rrect(r, CARD, 12)
+            self.rrect(r, CARD_BORDER, 12, 1)
+            self.text("Esperando al ROV…", r.center, 26, "SemiBold", MUTED, "center")
+            self.text("sin telemetría", (r.centerx, r.centery + 30), 16, "Regular", MUTED, "center")
             return
 
-        # Batería
-        vcol = RED if t.has(P.TF_LOWBAT_CRIT) else YELLOW if t.has(P.TF_LOWBAT_WARN) else GREEN
-        self.text("Batería", (PX + 14, y), self.f_small, MUTED)
-        val(f"{t.vbat:5.2f} V", (PX + 120), y - 2, self.f_bold, vcol)
-        self.bar(pygame.Rect(PX + 200, y + 3, PW - 214, 10), (t.vbat - 10.5) / (12.6 - 10.5), vcol)
-        y += 26
-
-        # Profundidad
-        self.text("Profundidad", (PX + 14, y), self.f_small, MUTED)
+        # ---------------------------------------------------------- PROFUNDIDAD
+        rect = pygame.Rect(x, ys[1], w, heights[1])
+        self.card(rect, "waves", "PROFUNDIDAD")
+        split = rect.x + 262
+        pygame.draw.line(self.screen, LINE, (split, rect.y + 18), (split, rect.bottom - 18))
         if t.has(P.TF_DEPTH_OK):
-            val(f"{t.depth:5.2f} m", PX + 120, y - 6, self.f_big)
-            arrow = "↓" if t.vz > 0.02 else "↑" if t.vz < -0.02 else "·"
-            val(f"{arrow} {abs(t.vz):.2f} m/s", PX + 232, y, self.f_small)
-            sp = f"setpoint {t.depth_sp:.2f} m" if t.has(P.TF_DEPTH_HOLD) else "manual"
-            self.text(f"{sp}  ·  {t.pressure_mbar} mbar", (PX + 120, y + 24), self.f_small, MUTED)
+            r = self.text(f"{t.depth:.2f}", (rect.x + 14, rect.y + 28), 58, "SemiBold", dim(TEXT))
+            self.text("m", (r.right + 6, r.bottom - 16), 28, "Regular", dim(MUTED), "bottomleft")
+            self.text(f"presión  {t.pressure_mbar} mbar", (rect.x + 16, rect.bottom - 16), 15, "Medium",
+                      MUTED, "bottomleft")
         else:
-            val("sin sensor", PX + 120, y - 2, self.f_bold, RED)
-        y += 48
+            self.text("sin sensor", (rect.x + 16, rect.y + 60), 30, "SemiBold", RED)
+        hold = t.has(P.TF_DEPTH_HOLD)
+        lbl, col = self._mode(app.depth_hold, hold, "sensor")
+        mcol = TEXT if col == MUTED else col
+        rx = split + 18
+        self.icon("gauge", (rx, rect.y + 17), 22, mcol)
+        self.text("AUTO…" if len(lbl) > 12 else lbl, (rx + 30, rect.y + 28), 16, "SemiBold", mcol, "midleft")
+        vx0 = rx
+        if abs(t.vz) > 0.02:  # flecha: bajando / subiendo
+            self.icon("down" if t.vz > 0 else "up", (rx, rect.y + 60), 20, dim(CYAN))
+            vx0 += 24
+        r = self.text(f"{abs(t.vz):.2f}", (vx0, rect.y + 50), 32, "Medium", dim(TEXT))
+        self.text("m/s", (r.right + 6, r.bottom - 7), 18, "Regular", dim(MUTED), "bottomleft")
+        sp = f"objetivo  {t.depth_sp:.2f} m" if hold else "objetivo  —"
+        self.text(sp, (rx, rect.bottom - 16), 15, "Medium", dim(GREEN) if hold else MUTED, "bottomleft")
 
-        # Temperatura
-        self.text("Temp. agua", (PX + 14, y), self.f_small, MUTED)
+        # ---------------------------------------------------------- TEMP + BATERÍA
+        hw = (w - G) // 2
+        rect = pygame.Rect(x, ys[2], hw, heights[2])
+        self.card(rect, "thermo", "TEMP. AGUA")
         if t.water_temp is not None:
-            val(f"{t.water_temp:5.2f} °C", PX + 120, y - 6, self.f_big, CYAN)
+            r = self.text(f"{t.water_temp:.2f}", (rect.x + 16, rect.y + 42), 44, "SemiBold", dim(CYAN))
+            self.text("°C", (r.right + 6, r.bottom - 9), 20, "Regular", dim(MUTED), "bottomleft")
         else:
-            val("sin sensor", PX + 120, y - 2, self.f_bold, RED)
-        y += 38
+            self.text("sin sensor", (rect.x + 16, rect.y + 58), 24, "SemiBold", RED)
+        rect = pygame.Rect(x + hw + G, ys[2], hw, heights[2])
+        self.card(rect, "battery", "BATERÍA")
+        vcol = RED if t.has(P.TF_LOWBAT_CRIT) else YELLOW if t.has(P.TF_LOWBAT_WARN) else GREEN
+        r = self.text(f"{t.vbat:.2f}", (rect.x + 16, rect.y + 36), 44, "SemiBold", dim(vcol))
+        self.text("V", (r.right + 6, r.bottom - 9), 20, "Regular", dim(MUTED), "bottomleft")
+        bar = pygame.Rect(rect.x + 16, rect.bottom - 16, rect.w - 32, 6)
+        self.rrect(bar, TRACK, 4)
+        frac = max(0.0, min(1.0, (t.vbat - 10.5) / (12.6 - 10.5)))
+        if frac > 0:
+            self.rrect(pygame.Rect(bar.x, bar.y, int(bar.w * frac), bar.h), dim(vcol), 4)
 
-        # Actitud + horizonte
-        self.text("Cabeceo", (PX + 14, y), self.f_small, MUTED)
-        val(f"{t.pitch:+6.1f}°", PX + 90, y - 2)
-        if t.has(P.TF_PITCH_HOLD):
-            self.text(f"sp {t.pitch_sp:+.0f}°", (PX + 90, y + 18), self.f_small, MUTED)
-        self.text("Alabeo", (PX + 14, y + 40), self.f_small, MUTED)
-        val(f"{t.roll:+6.1f}°", PX + 90, y + 38)
-        self._horizon(PX + PW - 60, y + 30, 40, t.pitch, t.roll, stale or not t.has(P.TF_IMU_OK))
-        y += 76
+        # ---------------------------------------------------------- ACTITUD
+        rect = pygame.Rect(x, ys[3], w, heights[3])
+        self.card(rect, "attitude", "ACTITUD · CABECEO")
+        phold = t.has(P.TF_PITCH_HOLD)
+        lbl, col = self._mode(app.pitch_hold, phold, "armar")
+        self.chip(lbl, (rect.right - 14, rect.y + 12), col, "right")
+        r_h = 50
+        hc = (rect.x + 16 + r_h, rect.y + 48 + r_h)
+        self._horizon(hc, r_h, t.pitch, t.roll, stale or not t.has(P.TF_IMU_OK))
+        split = rect.x + 16 + 2 * r_h + 22
+        pygame.draw.line(self.screen, LINE, (split, rect.y + 52), (split, rect.bottom - 14))
+        vx = split + 20
+        self.text("CABECEO", (vx, rect.y + 50), 14, "SemiBold", MUTED)
+        r = self.text(f"{t.pitch:+.1f}°", (vx, rect.y + 64), 34, "SemiBold", dim(TEXT))
+        if phold:
+            self.text(f"objetivo {t.pitch_sp:+.0f}°", (r.right + 14, r.centery), 15, "Medium", dim(GREEN), "midleft")
+        self.text("ALABEO", (vx, rect.y + 104), 14, "SemiBold", MUTED)
+        self.text(f"{t.roll:+.1f}°", (vx, rect.y + 118), 34, "SemiBold", dim(TEXT))
 
-        # Lastre
-        self.text("Lastre", (PX + 14, y), self.f_small, MUTED)
-        r = pygame.Rect(PX + 90, y + 2, PW - 104, 14)
-        if t.ballast_pos is not None:
-            self.bar(r, t.ballast_pos, ORANGE)
-            pos = f"{t.ballast_pos * 100:3.0f} %"
+        # ---------------------------------------------------------- LASTRE
+        rect = pygame.Rect(x, ys[4], w, heights[4])
+        self.card(rect, "drop", "LASTRE")
+        if t.has(P.TF_BALLAST_FAULT):
+            state, scol = "FALLA", RED
         else:
-            pygame.draw.rect(self.screen, (40, 46, 54), r, border_radius=3)
-            pos = "posición ? (toque un fin de carrera)"
-        state = {1: "llenando ▼", -1: "vaciando ▲", 0: ""}[max(-1, min(1, t.ballast_dir))]
-        lims = ("LLENO " if t.has(P.TF_LIM_FULL) else "") + ("VACÍO" if t.has(P.TF_LIM_EMPTY) else "")
-        fault = "  FALLA" if t.has(P.TF_BALLAST_FAULT) else ""
-        self.text(f"{pos}  {state}  {lims}{fault}", (PX + 90, y + 20), self.f_small,
-                  RED if fault else MUTED)
-        y += 44
-
-        # Enlace
-        self.text("Enlace", (PX + 14, y), self.f_small, MUTED)
-        st = app.link.stats
-        if app.link.ok:
-            self.text(f"OK  {st.rate_hz:4.1f} Hz  {st.rtt_ms:4.1f} ms  err {t.rx_err}/{app.link.parser.errors}",
-                      (PX + 90, y), self.f_small, GREEN)
+            state, scol = {1: ("LLENANDO", CYAN), -1: ("VACIANDO", CYAN), 0: ("QUIETO", MUTED)}[
+                max(-1, min(1, t.ballast_dir))]
+        self.chip(state, (rect.right - 14, rect.y + 12), scol, "right")
+        bx, by, bw = rect.x + 16, rect.y + 58, rect.w - 32
+        nseg, gap = 12, 4
+        sw = (bw - gap * (nseg - 1)) / nseg
+        pos = t.ballast_pos
+        for i in range(nseg):
+            on = pos is not None and (i + 0.5) / nseg <= pos
+            self.rrect(pygame.Rect(int(bx + i * (sw + gap)), by, int(sw), 8), dim(CYAN) if on else TRACK, 3)
+        if pos is not None:
+            mx = bx + int(bw * pos)
+            pygame.draw.rect(self.screen, TEXT, (mx - 2, by - 5, 4, 18), border_radius=2)
+        ly = by + 26
+        self.text("Vacío · sube", (bx, ly), 15, "Medium", MUTED, "midleft")
+        self.text("Lleno · baja", (bx + bw, ly), 15, "Medium", MUTED, "midright")
+        if pos is not None:
+            self.text(f"{pos * 100:.0f} %", (bx + bw // 2, ly), 17, "SemiBold", dim(CYAN), "center")
         else:
-            err = getattr(app.link.transport, "error", None)
-            self.text("SIN ENLACE" + (f": {err[:28]}" if err else ""), (PX + 90, y), self.f_small, RED)
-        y += 20
-        self.text(f"Video: {app.video_status}  ·  Mando: {app.controls.pad_name[:22]}", (PX + 14, y),
-                  self.f_small, MUTED)
+            self.text("posición ? · toque un tope", (bx + bw // 2, ly), 15, "Medium", YELLOW, "center")
+        bw2 = (bw - G) // 2
+        for i, (name, flag, ic) in enumerate((("TOPE VACÍO", P.TF_LIM_EMPTY, "up"),
+                                              ("TOPE LLENO", P.TF_LIM_FULL, "down"))):
+            on = t.has(flag)
+            b = pygame.Rect(bx + i * (bw2 + G), rect.bottom - 54, bw2, 40)
+            if on:
+                self.rrect(b, CYAN, 8)
+                fg = (8, 20, 30)
+            else:
+                self.rrect(b, (11, 24, 37), 8)
+                self.rrect(b, CARD_BORDER, 8, 1)
+                fg = MUTED
+            tw = self.font(15, "SemiBold").size(name)[0]
+            ix = b.centerx - (tw + 26) // 2
+            self.icon(ic, (ix, b.centery - 9), 18, fg)
+            self.text(name, (ix + 26, b.centery), 15, "SemiBold", fg, "midleft")
 
-    def _horizon(self, cx: int, cy: int, r: int, pitch: float, roll: float, dim: bool) -> None:
-        size = 2 * r
-        surf = pygame.Surface((size, size), pygame.SRCALPHA)
-        surf.fill((60, 120, 200) if not dim else (60, 70, 80))
-        off = max(-r, min(r, pitch * 1.5))
-        ang = math.radians(roll)
-        c, s = math.cos(ang), math.sin(ang)
-        hx, hy = r, r + off
-        L = 3 * r
-        pts = [(hx - L * c, hy - L * s), (hx + L * c, hy + L * s), (hx + L * c - L * s, hy + L * s + L * c),
-               (hx - L * c - L * s, hy - L * s + L * c)]
-        pygame.draw.polygon(surf, (150, 100, 50) if not dim else (90, 90, 90), pts)
-        mask = pygame.Surface((size, size), pygame.SRCALPHA)
-        mask.fill((0, 0, 0, 0))
-        pygame.draw.circle(mask, (255, 255, 255, 255), (r, r), r)
+    def _horizon(self, c, r: int, pitch: float, roll: float, dim: bool) -> None:
+        s = 3  # supersampling para bordes suaves
+        n = 2 * r * s
+        surf = pygame.Surface((n, n), pygame.SRCALPHA)
+        sky, ground = ((60, 72, 84), (82, 82, 82)) if dim else (SKY, GROUND)
+        surf.fill(sky)
+        ppd = r * s / 40.0  # píxeles por grado
+        off = max(-r * s, min(r * s, pitch * ppd))
+        a = math.radians(-roll)
+        ca, sa = math.cos(a), math.sin(a)
+        cx = cy = n / 2
+
+        def rot(px, py):
+            return (cx + px * ca - py * sa, cy + off + px * sa + py * ca)
+
+        L = 3 * n
+        pygame.draw.polygon(surf, ground, [rot(-L, 0), rot(L, 0), rot(L, L), rot(-L, L)])
+        pygame.draw.line(surf, (235, 240, 245), rot(-L, 0), rot(L, 0), s * 2)
+        for deg in (-20, -10, 10, 20):  # escala de cabeceo
+            yy = -deg * ppd
+            hw = (0.22 if abs(deg) == 10 else 0.34) * r * s
+            pygame.draw.line(surf, (235, 240, 245), rot(-hw, yy), rot(hw, yy), s)
+        mask = pygame.Surface((n, n), pygame.SRCALPHA)
+        pygame.draw.circle(mask, (255, 255, 255, 255), (n // 2, n // 2), n // 2)
         surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
-        self.screen.blit(surf, (cx - r, cy - r))
-        pygame.draw.circle(self.screen, LINE, (cx, cy), r, 2)
-        pygame.draw.line(self.screen, YELLOW, (cx - r // 2, cy), (cx - 6, cy), 3)
-        pygame.draw.line(self.screen, YELLOW, (cx + 6, cy), (cx + r // 2, cy), 3)
+        surf = pygame.transform.smoothscale(surf, (2 * r, 2 * r))
+        self.screen.blit(surf, (c[0] - r, c[1] - r))
+        pygame.draw.circle(self.screen, CARD_BORDER, c, r + 1, 2)
+        # marca fija del ROV
+        pygame.draw.line(self.screen, YELLOW, (c[0] - r * 0.55, c[1]), (c[0] - 8, c[1]), 3)
+        pygame.draw.line(self.screen, YELLOW, (c[0] + 8, c[1]), (c[0] + r * 0.55, c[1]), 3)
+        pygame.draw.circle(self.screen, YELLOW, c, 3)
+        pygame.draw.polygon(self.screen, TEXT, [(c[0], c[1] - r + 2), (c[0] - 5, c[1] - r + 11),
+                                                (c[0] + 5, c[1] - r + 11)])
 
-    def _bottom_bar(self, app) -> None:
-        y0 = VH
-        pygame.draw.rect(self.screen, (10, 12, 16), (0, y0, W, H - VH))
-        pygame.draw.line(self.screen, LINE, (0, y0), (W, y0))
-        self.text(clock_str(), (12, y0 + 11), self.f_mono, TEXT)
-        x = 190
+    # ------------------------------------------------------------------ barra inferior
+    def pill(self, s: str, x: int, y: int, color, icon: str | None = None, filled: bool = False) -> int:
+        tw = self.font(16, "SemiBold").size(s)[0]
+        iw = 26 if icon else 0
+        r = pygame.Rect(x, y, tw + iw + 32, 40)
+        if filled:
+            self.rrect(r, color, 20)
+        else:
+            self.rrect(r, mix(BAR, color, 0.22), 20)
+            self.rrect(r, mix(BAR, color, 0.75), 20, 1)
+        if icon:
+            self.icon(icon, (x + 16, r.centery - 10), 20, TEXT)
+        self.text(s, (x + 16 + iw, r.centery), 16, "SemiBold", TEXT, "midleft")
+        return r.right + 10
+
+    def _footer(self, app) -> None:
+        y0 = H - FTR
+        pygame.draw.rect(self.screen, BAR, (0, y0, W, FTR))
+        pygame.draw.line(self.screen, CARD_BORDER, (0, y0), (W, y0))
+        cy = y0 + FTR // 2
+        self.icon("clock", (M + 4, cy - 12), 24, MUTED)
+        self.mono(clock_str(), (M + 40, cy - 17), 28, "Medium", TEXT)
+        x = M + 40 + 190
+        pygame.draw.line(self.screen, LINE, (x, cy - 16), (x, cy + 16))
+        x += 20
         if app.session.recording:
             if int(time.time() * 2) % 2:
-                pygame.draw.circle(self.screen, RED, (x + 8, y0 + 24), 7)
-            self.text("REC", (x + 20, y0 + 15), self.f_bold, RED)
+                pygame.draw.circle(self.screen, RED, (x + 8, cy), 8)
+            self.text("REC", (x + 24, cy), 18, "Bold", RED, "midleft")
         else:
-            self.text("no graba", (x, y0 + 16), self.f_small, MUTED)
-        x = 270
+            self.text("NO GRABA", (x, cy), 15, "SemiBold", MUTED, "midleft")
+        x += 92
         t = app.link.telemetry
         armed = bool(t and t.has(P.TF_ARMED) and app.link.ok)
-        x = self.pill("ARMADO" if armed else "DESARMADO", x, y0 + 11, RED if armed else (60, 66, 74))
-        x = self.pill("CAB AUTO" if app.pitch_hold else "CAB MANUAL", x, y0 + 11,
-                      GREEN if app.pitch_hold else (60, 66, 74))
-        x = self.pill("PROF AUTO" if app.depth_hold else "PROF MANUAL", x, y0 + 11,
-                      GREEN if app.depth_hold else (60, 66, 74))
-        x = self.pill(f"POT {app.power}%", x, y0 + 11, (50, 70, 110))
+        if armed:
+            x = self.pill("ARMADO", x, cy - 20, RED, "shield", filled=True)
+        else:
+            x = self.pill("DESARMADO", x, cy - 20, MUTED, "shield")
+        x = self.pill(f"POT {app.power}%", x, cy - 20, BLUE, "bolt")
+        if app.link.ok:
+            errs = app.link.parser.errors + (t.rx_err if t else 0)
+            now = time.monotonic()
+            if errs != self._errs:
+                self._err_t = now
+            self._errs = errs
+            recent = now - self._err_t < 3.0
+            hz = app.link.stats.rate_hz
+            txt = (f"ENLACE {hz:.0f} Hz" if hz >= 1 else "ENLACE OK") + ("  ·  ERR" if recent else "")
+            x = self.pill(txt, x, cy - 20, YELLOW if recent else GREEN, "signal")
         warns = []
         if not app.link.ok:
             warns.append("SIN ENLACE")
@@ -318,47 +618,63 @@ class UI:
                 warns.append("BATERÍA BAJA")
             if t.has(P.TF_BALLAST_FAULT):
                 warns.append("FALLA LASTRE")
+        blink = int(time.time() * 3) % 3 != 0
         for wtxt in warns:
-            if int(time.time() * 3) % 3:
-                x = self.pill(wtxt, x, y0 + 11, RED)
-            else:
-                x = self.pill(wtxt, x, y0 + 11, (90, 30, 30))
-        # motores
-        if t:
-            mx = W - 5 * 34 - 10
-            for i, m in enumerate(t.motors):
-                r = pygame.Rect(mx + i * 34, y0 + 8, 26, 32)
-                pygame.draw.rect(self.screen, (40, 46, 54), r, border_radius=3)
-                h = int(abs(m) * 15)
-                mid = r.y + 16
-                rr = pygame.Rect(r.x + 3, mid - h if m > 0 else mid, 20, h)
-                pygame.draw.rect(self.screen, ORANGE if i < 4 else CYAN, rr)
-                self.text(f"M{i + 1}", (r.centerx, r.bottom - 1), _font(10), MUTED, "midbottom")
+            x = self.pill(wtxt, x, cy - 20, RED if blink else (110, 30, 30), filled=True)
 
-    def _list_panel(self, title: str, help_: list[str], rows: list[tuple[str, str, str]], sel: int, footer: str,
-                    width: int = VW - 80, alpha: int = 230) -> None:
-        x0, y0 = 20, 66  # debajo del banner
-        panel = pygame.Surface((width, VH - y0 - 20), pygame.SRCALPHA)
-        panel.fill((10, 12, 16, alpha))
+        # motores
+        mw, mg = 46, 8
+        mx = W - M - 5 * mw - 4 * mg
+        self.text("MOTORES", (mx - 18, cy), 15, "SemiBold", MUTED, "midright")
+        sep = mx - 18 - self.font(15, "SemiBold").size("MOTORES")[0] - 18
+        pygame.draw.line(self.screen, LINE, (sep, cy - 16), (sep, cy + 16))
+        if app.controls.pad is None:
+            self.text("sin mando: teclado", (sep - 16, cy), 14, "Medium", MUTED, "midright")
+        motors = t.motors if t else [0.0] * 5
+        for i, m in enumerate(motors):
+            b = pygame.Rect(mx + i * (mw + mg), cy - 22, mw, 44)
+            self.rrect(b, (11, 24, 37), 8)
+            self.rrect(b, CARD_BORDER, 8, 1)
+            self.text(f"M{i + 1}", (b.centerx, b.y + 16), 15, "SemiBold", TEXT, "center")
+            # barra desde el centro: derecha = positivo, izquierda = negativo
+            tr = pygame.Rect(b.x + 6, b.bottom - 11, b.w - 12, 5)
+            self.rrect(tr, TRACK, 2)
+            if abs(m) > 0.01:
+                half = tr.w // 2
+                ln = max(2, int(abs(m) * half))
+                fr = pygame.Rect(tr.centerx if m > 0 else tr.centerx - ln, tr.y, ln, tr.h)
+                self.rrect(fr, ORANGE if i < 4 else CYAN, 2)
+            pygame.draw.line(self.screen, MUTED, (tr.centerx, tr.y - 1), (tr.centerx, tr.bottom), 1)
+
+    # ------------------------------------------------------------------ paneles F2 / F3
+    def _list_panel(self, title: str, help_: list[str], rows, sel: int, footer: str,
+                    width: int, alpha: int = 235) -> None:
+        x0, y0 = VX + 16, VY + 76
+        hgt = VH - 76 - 16
+        panel = pygame.Surface((width, hgt), pygame.SRCALPHA)
+        pygame.draw.rect(panel, (*CARD, alpha), panel.get_rect(), border_radius=12)
         self.screen.blit(panel, (x0, y0))
-        self.text(title, (x0 + 16, y0 + 10), self.f_big, ORANGE)
-        y = y0 + 46
+        self.rrect(pygame.Rect(x0, y0, width, hgt), CARD_BORDER, 12, 1)
+        self.text(title, (x0 + 20, y0 + 16), 24, "Bold", CYAN)
+        y = y0 + 54
         for line in help_:
-            self.text(line, (x0 + 16, y), self.f_small, MUTED)
-            y += 18
-        y += 8
-        visible = (VH - 60 - y) // 24
+            self.text(line, (x0 + 20, y), 14, "Regular", MUTED)
+            y += 20
+        y += 10
+        rowh = 28
+        visible = (y0 + hgt - 56 - y) // rowh
         top = max(0, min(sel - visible // 2, len(rows) - visible))
-        vx = x0 + int(width * 0.55)
+        vx = x0 + int(width * (0.56 if width >= 600 else 0.72))
         for i in range(top, min(len(rows), top + visible)):
             name, value, unit = rows[i]
             if i == sel:
-                pygame.draw.rect(self.screen, (50, 60, 75), (x0 + 8, y - 2, width - 16, 24), border_radius=4)
-            self.text(name, (x0 + 16, y), self.f_mono_s, TEXT if i == sel else MUTED)
-            self.text(value, (vx, y), self.f_mono_s, TEXT)
-            self.text(unit, (vx + 110, y), self.f_small, MUTED)
-            y += 24
-        self.text(footer, (x0 + 16, VH - 44), self.f_small if width < 600 else self.f_norm, TEXT)
+                self.rrect(pygame.Rect(x0 + 10, y - 3, width - 20, rowh - 2), TRACK, 6)
+            self.text(name, (x0 + 22, y), 16, "Medium", TEXT if i == sel else MUTED)
+            self.text(value, (vx, y), 16, "SemiBold", TEXT)
+            if unit:
+                self.text(unit, (vx + 110, y), 14, "Regular", MUTED)
+            y += rowh
+        self.text(footer, (x0 + 20, y0 + hgt - 34), 15, "Medium", TEXT)
 
     def _params_panel(self, app) -> None:
         rows = []
@@ -370,7 +686,7 @@ class UI:
             "PARÁMETROS DEL ROV",
             ["↑↓ elegir   ←→ ajustar (Shift ×10)   Ctrl+S guardar en la flash del ROV   F2 cerrar",
              "Los cambios se aplican al instante; sin Ctrl+S se pierden al apagar el ROV."],
-            rows, app.panel_sel, f"{sel.name}: {sel.desc}")
+            rows, app.panel_sel, f"{sel.name}: {sel.desc}", width=VW - 32)
 
     def _vision_panel(self, app) -> None:
         rows = []
@@ -381,20 +697,21 @@ class UI:
             "AJUSTE DE VISIÓN",
             ["↑↓ elegir   ←→ ajustar (Shift ×10)", "Tab máscara   Ctrl+S guardar   F3 cerrar"],
             rows, app.panel_sel, f"Máscara: {app.mask_kind or 'ninguna'} (rojo cubo, morado genérico)",
-            width=360, alpha=200)
+            width=400, alpha=215)
 
+    # ------------------------------------------------------------------ banner y mensajes
     def _banner_and_toast(self, app) -> None:
         now = time.monotonic()
         if app.banner and now < app.banner[2]:
             text, color, _ = app.banner
-            surf = self.f_banner.render(text, True, (255, 255, 255))
-            r = pygame.Rect(0, 0, VW, 56)
-            pygame.draw.rect(self.screen, color, r)
-            self.screen.blit(surf, surf.get_rect(center=r.center))
+            r = pygame.Rect(VX, VY, VW, 64)
+            pygame.draw.rect(self.screen, color, r, border_top_left_radius=12, border_top_right_radius=12)
+            self.text(text, r.center, 30, "Bold", (255, 255, 255), "center")
             if color == RED:  # marco rojo alrededor del video mientras dura el banner
-                pygame.draw.rect(self.screen, RED, (0, 0, VW, VH), 8)
+                self.rrect(VIDEO, RED, 12, 6)
         if app.toast and now < app.toast[1]:
-            surf = self.f_norm.render(app.toast[0], True, TEXT)
-            r = surf.get_rect(midbottom=(VW // 2, VH - 16))
-            pygame.draw.rect(self.screen, (10, 12, 16), r.inflate(24, 12), border_radius=8)
+            surf = self.font(17, "Medium").render(app.toast[0], True, TEXT)
+            r = surf.get_rect(midbottom=(VIDEO.centerx, VIDEO.bottom - 20))
+            self.rrect(r.inflate(32, 16), (8, 16, 26), 10)
+            self.rrect(r.inflate(32, 16), CARD_BORDER, 10, 1)
             self.screen.blit(surf, r)

@@ -39,6 +39,7 @@ KEY_ACTIONS = {
     pygame.K_F2: "panel_params",
     pygame.K_F3: "panel_vision",
     pygame.K_F5: "grabar",
+    pygame.K_F11: "pantalla",
     pygame.K_ESCAPE: "salir",
     pygame.K_UP: "arriba",
     pygame.K_DOWN: "abajo",

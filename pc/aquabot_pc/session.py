@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import queue
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -47,6 +48,10 @@ class Session:
         self.video_path: Path | None = None
         self._idx = 0
         self.recording = False
+        self.dropped = 0
+        self._q: "queue.Queue" = queue.Queue(maxsize=8)
+        self._wt = threading.Thread(target=self._writer_loop, daemon=True, name="grabacion")
+        self._wt.start()
         self.n_events = 0
         self.n_detections = 0
         self._rows = 0
@@ -115,15 +120,43 @@ class Session:
                 return w, path
         return None, None
 
+    # La codificación del video va en un hilo aparte para no frenar la interfaz. El hilo principal solo
+    # copia los bytes de la pantalla; si el disco se atrasa, se descartan cuadros en vez de bloquear.
+    def _writer_loop(self) -> None:
+        while True:
+            item = self._q.get()
+            if item is None:
+                return
+            kind, writer, data = item
+            try:
+                if kind == "ui":
+                    raw, (w, h) = data
+                    rgb = np.frombuffer(raw, np.uint8).reshape(h, w, 3)
+                    writer.write(cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+                elif kind == "raw":
+                    writer.write(data)
+                elif kind == "release":
+                    for wr in writer:
+                        if wr is not None:
+                            wr.release()
+            except Exception:  # noqa: BLE001
+                log.exception("grabación")
+
+    def _put(self, item) -> None:
+        try:
+            self._q.put_nowait(item)
+        except queue.Full:
+            self.dropped += 1
+
     def stop_recording(self) -> None:
-        for w in (self.writer, self.raw_writer):
-            if w is not None:
-                w.release()
+        if self.writer is not None or self.raw_writer is not None:
+            self._q.put(("release", (self.writer, self.raw_writer), None))  # después de los cuadros pendientes
         self.writer, self.raw_writer, self.recording = None, None, False
 
-    def write_frame(self, bgr: np.ndarray) -> None:
+    def write_frame(self, rgb_bytes: bytes, size: tuple[int, int]) -> None:
+        """Cuadro de la ventana completa como bytes RGB (pygame.image.tobytes)."""
         if self.writer is not None:
-            self.writer.write(bgr)
+            self._put(("ui", self.writer, (rgb_bytes, size)))
 
     def write_raw(self, bgr: np.ndarray) -> None:
         """Cuadro de la cámara tal cual (sin interfaz), para calibrar la detección después."""
@@ -133,10 +166,14 @@ class Session:
             h, w = bgr.shape[:2]
             self.raw_writer, _ = self._open_writer(f"camara_{self._idx:02d}", (w, h))
         if self.raw_writer is not None:
-            self.raw_writer.write(bgr)
+            self._put(("raw", self.raw_writer, bgr))
 
     def close(self) -> None:
         self.stop_recording()
+        self._q.put(None)
+        self._wt.join(timeout=10)
+        if self.dropped:
+            log.warning("Grabación: %d cuadros descartados (disco o CPU lentos)", self.dropped)
         with self._lock:
             self._tf.close()
             self._ef.close()

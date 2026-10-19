@@ -30,9 +30,14 @@ class App:
         self.cfg, self.cfg_path = cfg, cfg_path
         self.demo_seconds = demo_seconds
         pygame.init()
-        pygame.display.set_caption("AquaBot — piloteo")
-        flags = pygame.FULLSCREEN | pygame.SCALED if fullscreen else 0
-        self.screen = pygame.display.set_mode((W, H), flags)
+        pygame.display.set_caption("EIAquatic — Piloto ROV")
+        # SCALED: la superficie siempre es W×H (lo que se graba), y la ventana se escala si la pantalla es
+        # más pequeña. F11 alterna pantalla completa.
+        flags = pygame.SCALED | (pygame.FULLSCREEN if fullscreen else 0)
+        try:
+            self.screen = pygame.display.set_mode((W, H), flags)
+        except pygame.error:
+            self.screen = pygame.display.set_mode((W, H), pygame.FULLSCREEN if fullscreen else 0)
         self.ui = UI(self.screen)
         self.controls = Controls(cfg["mando"])
         self.detector = Detector(cfg["deteccion"])
@@ -280,6 +285,11 @@ class App:
                 self.say("Grabación detenida")
             elif self.session.start_recording((W, H)):
                 self.say(f"Grabando en {self.session.video_path}")
+        elif action == "pantalla":
+            try:
+                pygame.display.toggle_fullscreen()
+            except pygame.error as e:
+                self.say(f"No se pudo cambiar a pantalla completa: {e}")
         elif action == "salir":
             if time.monotonic() - self.esc_t < 2.0:
                 self.running = False
@@ -353,8 +363,7 @@ class App:
                 self.ui.draw(self)
                 pygame.display.flip()
                 if self.session.recording:
-                    arr = pygame.surfarray.array3d(self.screen).swapaxes(0, 1)
-                    self.session.write_frame(cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
+                    self.session.write_frame(pygame.image.tobytes(self.screen, "RGB"), self.screen.get_size())
                 clock.tick(FPS)
         finally:
             self.shutdown()
