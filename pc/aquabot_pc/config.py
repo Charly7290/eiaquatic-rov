@@ -24,6 +24,8 @@ DEFAULTS: dict = {
         "alto": 576,           # 576 = PAL, 480 = NTSC (debe coincidir con el OSD de la Caddx)
         "fps": 25,
         "fourcc": None,        # p. ej. "YUYV" si la capturadora lo necesita
+        "rotacion": 180,       # 0, 90, 180 o 270 (180 = cámara montada boca abajo, como en el ROV)
+        "espejo": False,       # voltear izquierda/derecha
     },
     "carpeta_sesiones": "sesiones",
     "grabar_al_inicio": True,

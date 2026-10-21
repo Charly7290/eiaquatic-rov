@@ -19,11 +19,17 @@ class VideoSource(threading.Thread):
     source: índice de dispositivo (int), ruta de archivo (str) o un objeto con render() (escena sintética).
     """
 
+    _ROT = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
     def __init__(self, source, width: int | None = None, height: int | None = None, fps: float = 25.0,
-                 fourcc: str | None = None) -> None:
+                 fourcc: str | None = None, rotation: int = 0, mirror: bool = False) -> None:
         super().__init__(daemon=True, name="video")
         self.source = source
         self.width, self.height, self.fps, self.fourcc = width, height, fps, fourcc
+        # Orientación de la cámara montada en el ROV: se corrige solo en la capturadora (un video grabado
+        # con camara_NN.mp4 ya viene corregido).
+        self.rotation = int(rotation) % 360
+        self.mirror = bool(mirror)
         self._lock = threading.Lock()
         self._frame: np.ndarray | None = None
         self._id = 0
@@ -106,6 +112,11 @@ class VideoSource(threading.Thread):
                 cap = None
                 time.sleep(0.5)
                 continue
+            if not is_file:
+                if self.rotation in self._ROT:
+                    frame = cv2.rotate(frame, self._ROT[self.rotation])
+                if self.mirror:
+                    frame = cv2.flip(frame, 1)
             self._publish(frame)
             n += 1
             now = time.monotonic()

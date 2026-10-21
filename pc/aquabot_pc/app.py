@@ -68,7 +68,8 @@ class App:
             self.video = VideoSource(SyntheticScene(self.sim), fps=vc["fps"])
         else:
             src = vc["dispositivo"] if video is None else video
-            self.video = VideoSource(src, vc["ancho"], vc["alto"], vc["fps"], vc["fourcc"])
+            self.video = VideoSource(src, vc["ancho"], vc["alto"], vc["fps"], vc["fourcc"],
+                                     rotation=vc.get("rotacion", 0), mirror=vc.get("espejo", False))
 
         # Estado de la interfaz
         self.frame: np.ndarray | None = None

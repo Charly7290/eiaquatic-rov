@@ -26,6 +26,8 @@ def main() -> None:
     ap.add_argument("--port", help="puerto serial (sobrescribe config.json)")
     ap.add_argument("--video", help="índice de la capturadora, ruta de un video, o 'none'")
     ap.add_argument("--config", default=str(HERE / "config.json"), help="archivo de configuración")
+    ap.add_argument("--rotar", type=int, choices=(0, 90, 180, 270),
+                    help="rotación de la cámara (sobrescribe config.json; 180 = boca abajo)")
     ap.add_argument("--no-rec", action="store_true", help="no grabar video al iniciar (F5 lo activa)")
     ap.add_argument("--fullscreen", action="store_true")
     ap.add_argument("--demo", type=float, help=argparse.SUPPRESS)  # prueba automática (segundos)
@@ -38,6 +40,8 @@ def main() -> None:
     cfg = C.load(cfg_path)
     if args.port:
         cfg["puerto"] = args.port
+    if args.rotar is not None:
+        cfg["video"]["rotacion"] = args.rotar
     video = None
     if args.video is not None:
         video = int(args.video) if args.video.isdigit() else args.video

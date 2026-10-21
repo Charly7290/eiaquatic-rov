@@ -7,7 +7,9 @@
     "ancho": 720,
     "alto": 576,
     "fps": 25,
-    "fourcc": null
+    "fourcc": null,
+    "rotacion": 180,
+    "espejo": false
   },
   "carpeta_sesiones": "sesiones",
   "grabar_al_inicio": true,
