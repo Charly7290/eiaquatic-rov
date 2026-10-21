@@ -84,7 +84,7 @@ static const int8_t IMU_MAP_UP[2]   = {0, +1};
 #define CONTROL_PERIOD_MS   20    // 50 Hz
 #define IMU_PERIOD_MS       10    // 100 Hz
 #define TEMP_PERIOD_MS      1000  // DS18B20 a 12 bits tarda 750 ms
-#define FAILSAFE_MS         500   // sin CMD válido -> thrusters a 0 y desarmado
+#define FAILSAFE_MS         1000  // sin CMD válido 1 s -> thrusters a 0 y desarmado (21 oct: 0.5 s era muy estricto con tether largo)
 #define DEPTH_ZERO_SAMPLES  25    // ~1 s de muestras para el cero de profundidad
 #define LOWBAT_THRUST_SCALE 0.4f  // con batería crítica
 

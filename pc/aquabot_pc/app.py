@@ -86,6 +86,7 @@ class App:
         self.banner: tuple[str, tuple, float] | None = None
         self.toast: tuple[str, float] | None = None
         self.confirmed_ids: set[int] = set()
+        self.depth_target: float | None = None  # objetivo fijo (m) en AUTO; None = setpoint con el stick
         self.vision_on = True  # False = solo video para navegar (sin detección ni contornos)
         self.last_confirm: dict | None = None
         self.frozen_roi: np.ndarray | None = None
@@ -265,7 +266,10 @@ class App:
                 self.say("Hold de profundidad no disponible: sin sensor de presión")
             else:
                 self.depth_hold = not self.depth_hold
+                self.depth_target = None
                 self.say("Profundidad AUTOMÁTICA (lastre)" if self.depth_hold else "Profundidad MANUAL (lastre)")
+        elif action in ("objetivo_mas", "objetivo_menos"):
+            self._step_depth_target(+0.1 if action == "objetivo_mas" else -0.1)
         elif action == "cero_prof":
             self.link.pulse_flag(P.CF_ZERO_DEPTH)
             self.session.log_event("CERO_PROFUNDIDAD", now_str())
@@ -317,6 +321,34 @@ class App:
                 self.say("Pulse ESC otra vez para salir (el ROV se desarma)")
 
     # ----------------------------------------------------------------- ciclo principal
+    def _step_depth_target(self, step: float) -> None:
+        """Objetivo de profundidad fijo en pasos de 10 cm. Activa AUTO si hace falta. El ROV mueve su
+        setpoint hacia el objetivo a HOLD_RATE (la app lo lleva con el canal vertical, como el stick)."""
+        t = self.link.telemetry
+        if t is None or not t.has(P.TF_DEPTH_OK):
+            self.say("Objetivo no disponible: sin sensor de presión")
+            return
+        if self.depth_target is None:
+            base = t.depth_sp if (self.depth_hold and t.has(P.TF_DEPTH_HOLD)) else t.depth
+            self.depth_target = round(max(0.0, base) * 10) / 10
+        self.depth_target = round(min(5.0, max(0.0, self.depth_target + step)), 2)
+        if not self.depth_hold:
+            self.depth_hold = True
+        self.say(f"Objetivo de profundidad {self.depth_target:.1f} m (AUTO)", 1.5)
+
+    def _depth_target_vert(self, vert_stick: float) -> float:
+        """Canal vertical a enviar: el stick del piloto, o el seguimiento del objetivo fijo."""
+        if self.depth_target is None:
+            return vert_stick
+        if abs(vert_stick) > 0.3 or not self.depth_hold:  # el piloto toma el control: se olvida el objetivo
+            self.depth_target = None
+            return vert_stick
+        t = self.link.telemetry
+        if t is None or not t.has(P.TF_DEPTH_HOLD):
+            return 0.0
+        e = t.depth_sp - self.depth_target  # + = setpoint más profundo que el objetivo -> subirlo
+        return 0.0 if abs(e) < 0.005 else max(-1.0, min(1.0, e / 0.05))
+
     def _safety(self) -> None:
         ok = self.link.ok
         t = self.link.telemetry
@@ -377,7 +409,7 @@ class App:
                 flags = (P.CF_ARM if self.arm_req else 0) | (P.CF_PITCH_HOLD if self.pitch_hold else 0) \
                     | (P.CF_DEPTH_HOLD if self.depth_hold else 0)
                 self.link.set_command(flags=flags, surge=axes["surge"], yaw=axes["yaw"], pitch=axes["pitch"],
-                                      vert=axes["vert"], power=self.power)
+                                      vert=self._depth_target_vert(axes["vert"]), power=self.power)
 
                 if self.video:
                     frame, fid, _ = self.video.latest()
@@ -404,6 +436,8 @@ class App:
         self.link.set_command(flags=0, surge=0, yaw=0, pitch=0, vert=0)
         time.sleep(0.2)
         self.link.stop()
+        if self.link.is_alive():  # que no escriba telemetría en archivos ya cerrados
+            self.link.join(timeout=1.0)
         if self.video:
             self.video.stop()
         self.session.close()

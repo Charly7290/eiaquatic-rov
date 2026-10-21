@@ -172,8 +172,8 @@ class SimROV:
         self.t_last = now
         if dt_total <= 0:
             return
-        # Sin comandos más de 0.5 s: failsafe (se evalúa al llegar el siguiente CMD).
-        if self.last_cmd_t and now - self.last_cmd_t > 0.5:
+        # Sin comandos más de 1 s: failsafe (se evalúa al llegar el siguiente CMD).
+        if self.last_cmd_t and now - self.last_cmd_t > 1.0:
             if self.armed:
                 self.arm_blocked = True
             self.armed = False

@@ -16,7 +16,7 @@ from . import protocol as P
 log = logging.getLogger(__name__)
 
 RESPONSE_TIMEOUT_S = 0.040
-LINK_OK_S = 0.5
+LINK_OK_S = 1.0  # igual al failsafe del ROV (FAILSAFE_MS): antes de eso, un hueco no desarma
 
 
 class SerialTransport:
@@ -162,7 +162,7 @@ class Link(threading.Thread):
             if got:
                 n_rate += 1
                 # Como mucho un mensaje de parámetros por ciclo, después del CMD: así el CMD
-                # nunca deja de salir a 20 Hz y el failsafe del ROV (0.5 s) no se dispara.
+                # nunca deja de salir a 20 Hz y el failsafe del ROV (1 s) no se dispara.
                 if not self._param_q.empty():
                     item = self._param_q.get_nowait()
                     if item[0] == "set":

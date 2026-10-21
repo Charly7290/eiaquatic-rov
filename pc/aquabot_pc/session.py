@@ -60,6 +60,8 @@ class Session:
     # ----------------------------------------------------------------- telemetría (hilo del enlace)
     def log_telemetry(self, t: P.Telemetry, cmd: P.Command) -> None:
         with self._lock:
+            if self._tf.closed:
+                return
             self._tw.writerow([
                 now_str(), f"{t.uptime:.3f}", t.flags, int(t.has(P.TF_ARMED)), f"{t.depth:.3f}",
                 f"{t.depth_sp:.3f}", f"{t.vz:.3f}", t.pressure_mbar,

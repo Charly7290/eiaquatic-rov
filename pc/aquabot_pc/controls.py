@@ -38,6 +38,11 @@ KEY_ACTIONS = {
     pygame.K_l: "nivelar",
     pygame.K_F1: "panel_ayuda",
     pygame.K_v: "vision",
+    pygame.K_PLUS: "objetivo_mas",
+    pygame.K_EQUALS: "objetivo_mas",
+    pygame.K_KP_PLUS: "objetivo_mas",
+    pygame.K_MINUS: "objetivo_menos",
+    pygame.K_KP_MINUS: "objetivo_menos",
     pygame.K_F2: "panel_params",
     pygame.K_F3: "panel_vision",
     pygame.K_F5: "grabar",
@@ -62,7 +67,9 @@ PAD_ACTIONS = {  # botón SDL GameController -> acción
     "START": "armar",
     "LEFTSHOULDER": "pot_menos",
     "RIGHTSHOULDER": "pot_mas",
-    "DPAD_UP": "vision",
+    "DPAD_LEFT": "vision",
+    "DPAD_UP": "objetivo_menos",   # objetivo menos profundo
+    "DPAD_DOWN": "objetivo_mas",   # objetivo más profundo
 }
 
 

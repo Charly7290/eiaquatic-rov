@@ -493,8 +493,20 @@ class UI:
             vx0 += 24
         r = self.text(f"{abs(t.vz):.2f}", (vx0, rect.y + 50), 32, "Medium", dim(TEXT))
         self.text("m/s", (r.right + 6, r.bottom - 7), 18, "Regular", dim(MUTED), "bottomleft")
-        sp = f"objetivo  {t.depth_sp:.2f} m" if hold else "objetivo  —"
-        self.text(sp, (rx, rect.bottom - 16), 15, "Medium", dim(GREEN) if hold else MUTED, "bottomleft")
+        if app.depth_target is not None:
+            sp, scol = f"obj  {app.depth_target:.2f} m", dim(GREEN) if hold else YELLOW
+        elif hold:
+            sp, scol = f"obj  {t.depth_sp:.2f} m", dim(GREEN)
+        else:
+            sp, scol = "obj  —", MUTED
+        self.text(sp, (rx, rect.bottom - 16), 15, "Medium", scol, "bottomleft")
+        # botones de objetivo fijo: subir / bajar 10 cm (también + / − o la cruceta)
+        bw, bh = 26, 22
+        for i, (ic, act) in enumerate((("up", "objetivo_menos"), ("down", "objetivo_mas"))):
+            br = pygame.Rect(rect.right - 14 - (2 - i) * (bw + 4) + 4, rect.bottom - 14 - bh, bw, bh)
+            self.button("", br, act)
+            hov = br.collidepoint(pygame.mouse.get_pos())
+            self.icon(ic, (br.centerx - 7, br.centery - 7), 14, TEXT if hov else MUTED)
 
         # ---------------------------------------------------------- TEMP + BATERÍA
         hw = (w - G) // 2
@@ -579,39 +591,43 @@ class UI:
             self.text(name, (ix + 26, b.centery), 15, "SemiBold", fg, "midleft")
 
     def _horizon(self, c, r: int, pitch: float, roll: float, dim: bool) -> None:
+        """Actitud vista desde ATRÁS del ROV: el horizonte queda fijo y el símbolo amarillo del ROV se
+        inclina con él (lado derecho abajo -> el símbolo baja a la derecha; nariz arriba -> sube)."""
         s = 3  # supersampling para bordes suaves
         n = 2 * r * s
         surf = pygame.Surface((n, n), pygame.SRCALPHA)
         sky, ground = ((60, 72, 84), (82, 82, 82)) if dim else (SKY, GROUND)
         surf.fill(sky)
+        pygame.draw.rect(surf, ground, (0, n // 2, n, n // 2))
         ppd = r * s / 40.0  # píxeles por grado
-        off = max(-r * s, min(r * s, pitch * ppd))
-        a = math.radians(-roll)
+        white = (235, 240, 245)
+        pygame.draw.line(surf, white, (0, n // 2), (n, n // 2), s * 2)
+        for deg in (-20, -10, 10, 20):  # escala de cabeceo (fija)
+            yy = n / 2 - deg * ppd
+            hw = (0.16 if abs(deg) == 10 else 0.26) * r * s
+            pygame.draw.line(surf, white, (n / 2 - hw, yy), (n / 2 + hw, yy), s)
+        # símbolo del ROV: alas + punto, rotado con el alabeo y desplazado con el cabeceo
+        off = max(-0.8 * r * s, min(0.8 * r * s, pitch * ppd))
+        a = math.radians(roll)
         ca, sa = math.cos(a), math.sin(a)
-        cx = cy = n / 2
+        cx, cy = n / 2, n / 2 - off
 
         def rot(px, py):
-            return (cx + px * ca - py * sa, cy + off + px * sa + py * ca)
+            return (cx + px * ca - py * sa, cy + px * sa + py * ca)
 
-        L = 3 * n
-        pygame.draw.polygon(surf, ground, [rot(-L, 0), rot(L, 0), rot(L, L), rot(-L, L)])
-        pygame.draw.line(surf, (235, 240, 245), rot(-L, 0), rot(L, 0), s * 2)
-        for deg in (-20, -10, 10, 20):  # escala de cabeceo
-            yy = -deg * ppd
-            hw = (0.22 if abs(deg) == 10 else 0.34) * r * s
-            pygame.draw.line(surf, (235, 240, 245), rot(-hw, yy), rot(hw, yy), s)
+        col = (150, 150, 150) if dim else YELLOW
+        w1, w0 = 0.62 * r * s, 0.12 * r * s
+        pygame.draw.line(surf, col, rot(-w1, 0), rot(-w0, 0), s * 3)
+        pygame.draw.line(surf, col, rot(w0, 0), rot(w1, 0), s * 3)
+        pygame.draw.line(surf, col, rot(-w0, 0), rot(0, w0 * 0.8), s * 3)
+        pygame.draw.line(surf, col, rot(w0, 0), rot(0, w0 * 0.8), s * 3)
+        pygame.draw.line(surf, col, rot(0, 0), rot(0, -0.22 * r * s), s * 2)  # "techo" del ROV
         mask = pygame.Surface((n, n), pygame.SRCALPHA)
         pygame.draw.circle(mask, (255, 255, 255, 255), (n // 2, n // 2), n // 2)
         surf.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
         surf = pygame.transform.smoothscale(surf, (2 * r, 2 * r))
         self.screen.blit(surf, (c[0] - r, c[1] - r))
         pygame.draw.circle(self.screen, CARD_BORDER, c, r + 1, 2)
-        # marca fija del ROV
-        pygame.draw.line(self.screen, YELLOW, (c[0] - r * 0.55, c[1]), (c[0] - 8, c[1]), 3)
-        pygame.draw.line(self.screen, YELLOW, (c[0] + 8, c[1]), (c[0] + r * 0.55, c[1]), 3)
-        pygame.draw.circle(self.screen, YELLOW, c, 3)
-        pygame.draw.polygon(self.screen, TEXT, [(c[0], c[1] - r + 2), (c[0] - 5, c[1] - r + 11),
-                                                (c[0] + 5, c[1] - r + 11)])
 
     # ------------------------------------------------------------------ barra inferior
     def pill(self, s: str, x: int, y: int, color, icon: str | None = None, filled: bool = False) -> int:
@@ -811,7 +827,8 @@ class UI:
                 ("Y", "cabeceo automático on/off"),
                 ("LB / RB", "potencia − / +"),
                 ("BACK (1 s)", "cero de profundidad"),
-                ("Cruceta arriba", "detección on/off (solo video)"),
+                ("Cruceta arriba / abajo", "objetivo de profundidad −/+ 10 cm"),
+                ("Cruceta izquierda", "detección on/off (solo video)"),
             ]),
             ("TECLADO", [
                 ("W / S · A / D", "avanzar / retroceder · girar"),
@@ -823,6 +840,7 @@ class UI:
                 ("Z", "cero de profundidad (en superficie)"),
                 ("L", "nivelar IMU (desarmado, quieto)"),
                 ("V", "detección on/off (solo video)"),
+                ("− / +", "objetivo de profundidad −/+ 10 cm"),
                 ("F1 F2 F3", "controles · parámetros · visión"),
                 ("F5 · F11", "grabar · pantalla completa"),
                 ("Esc ×2", "salir (desarma el ROV)"),
