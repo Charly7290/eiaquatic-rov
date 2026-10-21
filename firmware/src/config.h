@@ -66,7 +66,8 @@ static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, -1, -1, +1, +1};
 // Voltaje de batería: divisor 47k / 10k en GPIO39 (ADC1).
 #define PIN_VBAT         39
 #define VBAT_DIVIDER     (57.0f / 10.0f)
-#define VBAT_PRESENT_V   3.0f  // por debajo: no hay batería (alimentado por USB), sin alarmas
+#define VBAT_PRESENT_V   6.0f  // por debajo: no hay batería (solo USB: el divisor lee ~3.6 V), sin alarmas.
+                               // Un 3S nunca baja de ~9 V con carga, así que 6 V no oculta una batería real.
 
 // Orientación de la MPU6050 respecto al cuerpo del ROV.
 // Ejes del cuerpo: X hacia adelante, Y hacia la izquierda, Z hacia arriba.

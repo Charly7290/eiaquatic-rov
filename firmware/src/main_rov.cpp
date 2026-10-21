@@ -76,8 +76,6 @@ static uint16_t tempBadCount = 0;        // lecturas inválidas (diagnóstico)
 // Batería
 static float vbatFast = 0, vbatSlow = 0;
 static bool batPresent = false, lowWarn = false, lowCrit = false;
-static float critS = 0;
-static bool lowbatSurface = false;
 static bool surfacing = false;
 
 // Motores
@@ -267,17 +265,14 @@ static void updateBattery(float dt) {
   vbatSlow += ctl::clampf(dt / 3.0f, 0, 1) * (v - vbatSlow);
   batPresent = vbatSlow > VBAT_PRESENT_V;
   if (!batPresent) {
-    lowWarn = lowCrit = lowbatSurface = false;
-    critS = 0;
+    lowWarn = lowCrit = false;
     return;
   }
   const float HYST = 0.2f;
   lowWarn = lowWarn ? (vbatSlow < P(P_LOWBAT_WARN) + HYST) : (vbatSlow < P(P_LOWBAT_WARN));
   lowCrit = lowCrit ? (vbatSlow < P(P_LOWBAT_CRIT) + HYST) : (vbatSlow < P(P_LOWBAT_CRIT));
-  critS = lowCrit ? critS + dt : 0;
-  if (critS >= P(P_SURFACE_LOWBAT)) lowbatSurface = true;
-  // Se mantiene aunque el voltaje suba al bajar la carga; solo se limpia con un pack cargado.
-  if (vbatSlow > P(P_LOWBAT_WARN) + 0.8f) lowbatSurface = false;
+  // Solo avisos para el piloto (BATERÍA BAJA / CRÍTICA en la app). Decisión del equipo (21 oct):
+  // sin emersión automática por batería; el piloto ve el voltaje todo el tiempo y decide.
 }
 
 static void control(uint32_t now, float dt) {
@@ -292,7 +287,7 @@ static void control(uint32_t now, float dt) {
   }
 
   updateBattery(dt);
-  surfacing = lowbatSurface || (lastCmdMs != 0 && linkLostS >= P(P_SURFACE_LINKLOSS));
+  surfacing = lastCmdMs != 0 && linkLostS >= P(P_SURFACE_LINKLOSS);
 
   limFull = digitalRead(PIN_LIM_FULL) == LIM_PRESSED_LEVEL;
   limEmpty = digitalRead(PIN_LIM_EMPTY) == LIM_PRESSED_LEVEL;

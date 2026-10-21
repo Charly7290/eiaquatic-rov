@@ -76,6 +76,39 @@ class UI:
         self._mask = self._video_mask()
         self._errs = 0
         self._err_t = -99.0
+        self.hits: list[tuple[pygame.Rect, str]] = []  # zonas clicables del último cuadro -> acción
+
+    def hit(self, pos) -> str | None:
+        """Acción del botón/pestaña bajo el puntero (la última dibujada gana)."""
+        for r, act in reversed(self.hits):
+            if r.collidepoint(pos):
+                return act
+        return None
+
+    def button(self, label: str, rect: pygame.Rect, action: str, active: bool = False,
+               hint: str = "", size: int = 15) -> pygame.Rect:
+        hover = rect.collidepoint(pygame.mouse.get_pos())
+        if active:
+            self.rrect(rect, CYAN, rect.h // 2)
+            col = (8, 16, 26)
+        else:
+            self.rrect(rect, mix(CARD, CYAN, 0.18) if hover else CARD, rect.h // 2)
+            self.rrect(rect, CYAN if hover else LINE, rect.h // 2, 1)
+            col = TEXT if hover else MUTED
+        if hint:
+            f, fh = self.font(size, "SemiBold"), self.font(12, "Medium")
+            tw, hw = f.size(label)[0], fh.size(hint)[0]
+            x = rect.centerx - (tw + 8 + hw) // 2
+            self.text(label, (x, rect.centery), size, "SemiBold", col, "midleft")
+            self.text(hint, (x + tw + 8, rect.centery + 1), 12, "Medium",
+                      (40, 60, 80) if active else mix(col, CARD, 0.35), "midleft")
+        else:
+            self.text(label, rect.center, size, "SemiBold", col, "center")
+        self.hits.append((rect, action))
+        return rect
+
+    def tab_width(self, label: str, hint: str, size: int = 15) -> int:
+        return self.font(size, "SemiBold").size(label)[0] + 8 + self.font(12, "Medium").size(hint)[0] + 32
 
     # ================================================================== utilidades
     def font(self, size: int, weight: str = "Regular") -> pygame.font.Font:
@@ -251,6 +284,7 @@ class UI:
 
     # ================================================================== dibujo
     def draw(self, app) -> None:
+        self.hits = []
         self.screen.fill(BG)
         self._header(app)
         self._video(app)
@@ -260,6 +294,8 @@ class UI:
             self._params_panel(app)
         elif app.panel == "vision":
             self._vision_panel(app)
+        elif app.panel == "ayuda":
+            self._help_panel(app)
         self._banner_and_toast(app)
 
     # ------------------------------------------------------------------ cabecera
@@ -270,8 +306,23 @@ class UI:
         r = self.text("EIAquatic", (M + 48, HDR // 2), 26, "Bold", TEXT, "midleft")
         pygame.draw.line(self.screen, LINE, (r.right + 18, 16), (r.right + 18, HDR - 16), 1)
         self.text("Piloto ROV", (r.right + 36, HDR // 2), 18, "Regular", MUTED, "midleft")
+        on = app.vision_on
+        lbl, hint = ("Detección ON", "V") if on else ("Detección OFF", "V")
+        bw = self.tab_width(lbl, hint)
+        self.button(lbl, pygame.Rect(r.right + 170, 11, bw, HDR - 22), "vision", on, hint)
+        x = W - M
         if app.sim is not None:
-            self.chip("SIMULADOR", (W - M, 14), YELLOW, "right")
+            x = self.chip("SIMULADOR", (W - M, 14), YELLOW, "right").x - 20
+        # Pestañas (clic con el mouse o la tecla indicada). "Piloto" cierra los paneles.
+        tabs = [("Piloto", "", "panel_cerrar", app.panel is None),
+                ("Parámetros ROV", "F2", "panel_params", app.panel == "params"),
+                ("Visión", "F3", "panel_vision", app.panel == "vision"),
+                ("Controles", "F1", "panel_ayuda", app.panel == "ayuda")]
+        widths = [self.tab_width(lbl, hint) for lbl, hint, _, _ in tabs]
+        x -= sum(widths) + 8 * (len(tabs) - 1)
+        for (lbl, hint, act, on), w in zip(tabs, widths):
+            self.button(lbl, pygame.Rect(x, 11, w, HDR - 22), act, on, hint)
+            x += w + 8
 
     # ------------------------------------------------------------------ video
     def _video(self, app) -> None:
@@ -374,6 +425,8 @@ class UI:
         best = app.detector.best_candidate()
         if frozen:
             state, scol = "DETECTADO", RED
+        elif not app.vision_on:
+            state, scol = "APAGADA", MUTED
         elif best is not None and best.stable:
             state, scol = "CANDIDATO", YELLOW
         else:
@@ -392,7 +445,8 @@ class UI:
             self.screen.blit(surf, surf.get_rect(center=box.center))
         else:
             self.icon("image", (box.centerx - 18, box.centery - 30), 36, MUTED)
-            self.text("Sin objeto a la vista", (box.centerx, box.centery + 20), 16, "Regular", MUTED, "center")
+            msg = "Sin objeto a la vista" if app.vision_on else "Detección apagada · solo video"
+            self.text(msg, (box.centerx, box.centery + 20), 16, "Regular", MUTED, "center")
         self.rrect(box, RED if frozen else CARD_BORDER, 8, 3 if frozen else 1)
         ly = box.bottom + 20
         if frozen:
@@ -402,6 +456,8 @@ class UI:
         elif best is not None and best.stable:
             self.text(best.label, (rect.x + 16, ly), 16, "SemiBold", YELLOW, "midleft")
             self.text("pulse A para confirmar", (rect.right - 16, ly), 15, "Regular", TEXT, "midright")
+        elif not app.vision_on:
+            self.text("A marca un hallazgo manual · V reactiva", (rect.x + 16, ly), 15, "Regular", MUTED, "midleft")
         else:
             self.text("la visión no ve nada estable", (rect.x + 16, ly), 15, "Regular", MUTED, "midleft")
 
@@ -647,34 +703,68 @@ class UI:
             pygame.draw.line(self.screen, MUTED, (tr.centerx, tr.y - 1), (tr.centerx, tr.bottom), 1)
 
     # ------------------------------------------------------------------ paneles F2 / F3
-    def _list_panel(self, title: str, help_: list[str], rows, sel: int, footer: str,
-                    width: int, alpha: int = 235) -> None:
-        x0, y0 = VX + 16, VY + 76
-        hgt = VH - 76 - 16
+    def _panel_frame(self, title: str, width: int, alpha: int = 235) -> tuple[int, int, int]:
+        x0, y0 = VX + 16, VY + 16
+        hgt = VH - 32
         panel = pygame.Surface((width, hgt), pygame.SRCALPHA)
         pygame.draw.rect(panel, (*CARD, alpha), panel.get_rect(), border_radius=12)
         self.screen.blit(panel, (x0, y0))
         self.rrect(pygame.Rect(x0, y0, width, hgt), CARD_BORDER, 12, 1)
+        # el panel tapa el video: los clics no deben atravesarlo
+        self.hits.append((pygame.Rect(x0, y0, width, hgt), "nada"))
         self.text(title, (x0 + 20, y0 + 16), 24, "Bold", CYAN)
-        y = y0 + 54
+        self.button("Cerrar", pygame.Rect(x0 + width - 106, y0 + 14, 90, 32), "panel_cerrar")
+        return x0, y0, hgt
+
+    def _list_panel(self, title: str, help_: list[str], rows, sel: int, footer: str,
+                    width: int, alpha: int = 235, extra: list[tuple[str, str]] = ()) -> None:
+        x0, y0, hgt = self._panel_frame(title, width, alpha)
+        y = y0 + 58
         for line in help_:
             self.text(line, (x0 + 20, y), 14, "Regular", MUTED)
             y += 20
         y += 10
-        rowh = 28
-        visible = (y0 + hgt - 56 - y) // rowh
+        rowh = 30
+        list_bottom = y0 + hgt - 96
+        visible = max(1, (list_bottom - y) // rowh)
         top = max(0, min(sel - visible // 2, len(rows) - visible))
-        vx = x0 + int(width * (0.56 if width >= 600 else 0.72))
+        vx = x0 + int(width * (0.50 if width >= 600 else 0.56))
+        bw = 30
         for i in range(top, min(len(rows), top + visible)):
             name, value, unit = rows[i]
+            row = pygame.Rect(x0 + 10, y - 4, width - 20, rowh - 2)
+            hover = row.collidepoint(pygame.mouse.get_pos())
             if i == sel:
-                self.rrect(pygame.Rect(x0 + 10, y - 3, width - 20, rowh - 2), TRACK, 6)
+                self.rrect(row, TRACK, 6)
+            elif hover:
+                self.rrect(row, mix(CARD, TRACK, 0.5), 6)
+            self.hits.append((row, f"sel:{i}"))
             self.text(name, (x0 + 22, y), 16, "Medium", TEXT if i == sel else MUTED)
             self.text(value, (vx, y), 16, "SemiBold", TEXT)
             if unit:
-                self.text(unit, (vx + 110, y), 14, "Regular", MUTED)
+                self.text(unit, (vx + 90, y), 14, "Regular", MUTED)
+            if i == sel:  # botones − / + de la fila elegida
+                rp = pygame.Rect(row.right - bw - 6, row.y + 2, bw, row.h - 4)
+                rm = pygame.Rect(rp.x - bw - 6, rp.y, bw, rp.h)
+                for r, act, plus in ((rm, "izq", False), (rp, "der", True)):
+                    self.button("", r, act)
+                    c = TEXT if r.collidepoint(pygame.mouse.get_pos()) else MUTED
+                    pygame.draw.line(self.screen, c, (r.centerx - 6, r.centery), (r.centerx + 6, r.centery), 2)
+                    if plus:
+                        pygame.draw.line(self.screen, c, (r.centerx, r.centery - 6), (r.centerx, r.centery + 6), 2)
             y += rowh
-        self.text(footer, (x0 + 20, y0 + hgt - 34), 15, "Medium", TEXT)
+        if len(rows) > visible:  # indicador de desplazamiento
+            bar_h = (list_bottom - (y0 + 92)) * visible // len(rows)
+            by = y0 + 92 + (list_bottom - (y0 + 92) - bar_h) * top // max(1, len(rows) - visible)
+            self.rrect(pygame.Rect(x0 + width - 6, by, 3, bar_h), LINE, 2)
+        self.text(footer, (x0 + 20, y0 + hgt - 80), 15, "Medium", TEXT)
+        # botones inferiores
+        bx = x0 + width - 20
+        for label, act in [("Guardar", "guardar"), *extra]:
+            w = self.font(15, "SemiBold").size(label)[0] + 40
+            bx -= w
+            self.button(label, pygame.Rect(bx, y0 + hgt - 50, w, 34), act, active=(act == "guardar"))
+            bx -= 10
 
     def _params_panel(self, app) -> None:
         rows = []
@@ -684,20 +774,72 @@ class UI:
         sel = P.PARAMS[app.panel_sel]
         self._list_panel(
             "PARÁMETROS DEL ROV",
-            ["↑↓ elegir   ←→ ajustar (Shift ×10)   Ctrl+S guardar en la flash del ROV   F2 cerrar",
-             "Los cambios se aplican al instante; sin Ctrl+S se pierden al apagar el ROV."],
+            ["Clic en una fila para elegirla y − / + para ajustar (o ↑↓ y ←→; Shift ×10, rueda del mouse para moverse).",
+             "Los cambios se aplican al instante; sin «Guardar» se pierden al apagar el ROV."],
             rows, app.panel_sel, f"{sel.name}: {sel.desc}", width=VW - 32)
 
     def _vision_panel(self, app) -> None:
         rows = []
+        names = {"generico": "genérico", "cubo": "naranja", "moneda": "moneda"}
         for sec, key, _step, _lo, _hi in TUNABLE:
             v = app.detector.cfg[sec][key] if sec else app.detector.cfg[key]
-            rows.append((f"{sec}.{key}" if sec else key, f"{v:.3g}" if isinstance(v, float) else str(v), ""))
+            if isinstance(v, bool):
+                val = "SÍ" if v else "no"
+            else:
+                val = f"{v:.3g}" if isinstance(v, float) else str(v)
+            rows.append((f"{names[sec]}.{key}" if sec else key, val, ""))
         self._list_panel(
             "AJUSTE DE VISIÓN",
-            ["↑↓ elegir   ←→ ajustar (Shift ×10)", "Tab máscara   Ctrl+S guardar   F3 cerrar"],
-            rows, app.panel_sel, f"Máscara: {app.mask_kind or 'ninguna'} (rojo cubo, morado genérico)",
-            width=400, alpha=215)
+            ["Clic en una fila y − / + para ajustar.", "En «activo»: − apaga, + enciende.",
+             "Más umbral = menos falsos positivos."],
+            rows, app.panel_sel, f"Máscara: {({'cubo': 'naranja', 'generico': 'genérico'}).get(app.mask_kind, 'ninguna')}"
+                                 " (rojo naranja, morado genérico)",
+            width=440, alpha=215, extra=[("Máscara", "siguiente_mascara")])
+
+    def _help_panel(self, app) -> None:
+        width = VW - 32
+        x0, y0, hgt = self._panel_frame("CONTROLES", width)
+        cols = [
+            ("MANDO", [
+                ("Stick izquierdo", "avanzar / retroceder y girar"),
+                ("Stick derecho (vertical)", "subir / bajar (lastre o setpoint)"),
+                ("Gatillos RT / LT", "cabeceo manual (nariz arriba / abajo)"),
+                ("START", "armar / desarmar"),
+                ("A", "confirmar objeto detectado"),
+                ("X", "marcar temperatura"),
+                ("B", "profundidad automática on/off"),
+                ("Y", "cabeceo automático on/off"),
+                ("LB / RB", "potencia − / +"),
+                ("BACK (1 s)", "cero de profundidad"),
+                ("Cruceta arriba", "detección on/off (solo video)"),
+            ]),
+            ("TECLADO", [
+                ("W / S · A / D", "avanzar / retroceder · girar"),
+                ("R / F · T / G", "subir / bajar · cabeceo"),
+                ("Enter", "armar / desarmar"),
+                ("Espacio · C", "confirmar objeto · temperatura"),
+                ("H · P", "profundidad auto · cabeceo auto"),
+                ("1 2 3 4", "potencia 25 / 50 / 75 / 100 %"),
+                ("Z", "cero de profundidad (en superficie)"),
+                ("L", "nivelar IMU (desarmado, quieto)"),
+                ("V", "detección on/off (solo video)"),
+                ("F1 F2 F3", "controles · parámetros · visión"),
+                ("F5 · F11", "grabar · pantalla completa"),
+                ("Esc ×2", "salir (desarma el ROV)"),
+            ]),
+        ]
+        cw = (width - 60) // 2
+        for k, (title, items) in enumerate(cols):
+            x = x0 + 20 + k * (cw + 20)
+            y = y0 + 70
+            self.text(title, (x, y), 15, "Bold", CYAN)
+            y += 32
+            for key, desc in items:
+                self.text(key, (x, y), 16, "SemiBold", TEXT)
+                self.text(desc, (x + int(cw * 0.42), y), 16, "Regular", MUTED)
+                y += 30
+        self.text("Con el panel de parámetros o de visión abierto, el pilotaje con el mando sigue activo.",
+                  (x0 + 20, y0 + hgt - 40), 14, "Regular", MUTED)
 
     # ------------------------------------------------------------------ banner y mensajes
     def _banner_and_toast(self, app) -> None:

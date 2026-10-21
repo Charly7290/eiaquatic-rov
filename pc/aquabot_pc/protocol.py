@@ -208,7 +208,7 @@ PARAMS: list[ParamInfo] = [
     ParamInfo(13, "LOWBAT_WARN", 10.5, 6.0, 13.0, 0.1, "V", "Batería: aviso"),
     ParamInfo(14, "LOWBAT_CRIT", 9.9, 6.0, 13.0, 0.1, "V", "Batería: crítica (empuje al 40 %)"),
     ParamInfo(15, "SURFACE_LINKLOSS", 15.0, 1.0, 300.0, 1.0, "s", "Emerger tras perder el enlace"),
-    ParamInfo(16, "SURFACE_LOWBAT", 10.0, 1.0, 300.0, 1.0, "s", "Emerger tras batería crítica"),
+    ParamInfo(16, "SURFACE_LOWBAT", 10.0, 1.0, 300.0, 1.0, "s", "Sin uso (no hay emersión por batería)"),
     ParamInfo(17, "WATER_DENSITY", 997.0, 990.0, 1030.0, 1.0, "kg/m³", "Densidad del agua"),
     ParamInfo(18, "MOTOR_MIN_DUTY", 0.08, 0.0, 0.5, 0.01, "", "Duty mínimo (zona muerta)"),
     ParamInfo(19, "RAMP_PER_S", 3.0, 0.2, 50.0, 0.1, "1/s", "Rampa de los thrusters"),

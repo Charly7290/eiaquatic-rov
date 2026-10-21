@@ -60,7 +60,7 @@
       "aspecto_max": 2.5
     },
     "moneda": {
-      "activo": true,
+      "activo": false,
       "radio_min": 3,
       "radio_max": 40,
       "param2": 18,
@@ -68,8 +68,8 @@
     },
     "generico": {
       "activo": true,
-      "umbral": 45,
-      "area_min": 300,
+      "umbral": 25,
+      "area_min": 60,
       "alargamiento_max": 4.0
     }
   }

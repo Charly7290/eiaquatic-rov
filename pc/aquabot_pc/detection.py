@@ -1,7 +1,12 @@
-"""Detección de objetos con visión clásica (OpenCV): cubo naranja, moneda y objeto genérico.
+"""Detección de objetos con visión clásica (OpenCV).
+
+Detector principal: GENÉRICO, cualquier mancha cuyo color se separa del fondo de la piscina (no depende
+de forma ni tamaño, que cambian con la perspectiva). Ayudas opcionales: color naranja (el color no cambia
+con la perspectiva) y círculos tipo moneda (apagado por defecto: frágil en perspectiva). Todos se muestran
+como "OBJETO".
 
 La visión PROPONE candidatos; el piloto CONFIRMA (botón A / barra espaciadora). Los umbrales se
-ajustan en vivo (F3) porque el color bajo el agua cambia con la luz y la profundidad.
+ajustan en vivo (pestaña Visión) porque el color bajo el agua cambia con la luz y la profundidad.
 """
 from __future__ import annotations
 
@@ -17,26 +22,28 @@ DEFAULT_CFG: dict = {
     "cuadros_estable": 6,  # cuadros seguidos para pasar de "visto" a "candidato"
     "cubo": {"activo": True, "h_min": 2, "h_max": 25, "s_min": 110, "v_min": 60, "area_min": 120,
              "solidez_min": 0.75, "aspecto_max": 2.5},
-    "moneda": {"activo": True, "radio_min": 3, "radio_max": 40, "param2": 18, "contraste_min": 22},
-    "generico": {"activo": True, "umbral": 45, "area_min": 300, "alargamiento_max": 4.0},
+    "moneda": {"activo": False, "radio_min": 3, "radio_max": 40, "param2": 18, "contraste_min": 22},
+    "generico": {"activo": True, "umbral": 25, "area_min": 60, "alargamiento_max": 4.0},
 }
 
-# Parámetros que se ajustan desde el panel F3: (sección, clave, paso, mínimo, máximo)
+# Parámetros que se ajustan desde la pestaña Visión: (sección, clave, paso, mínimo, máximo).
+# paso None = interruptor sí/no.
 TUNABLE = [
-    ("cubo", "h_min", 1, 0, 179), ("cubo", "h_max", 1, 0, 179), ("cubo", "s_min", 5, 0, 255),
+    ("generico", "activo", None, 0, 1), ("generico", "umbral", 1, 5, 150), ("generico", "area_min", 10, 10, 50000),
+    ("generico", "alargamiento_max", 0.2, 1.0, 20.0),
+    ("cubo", "activo", None, 0, 1), ("cubo", "h_min", 1, 0, 179), ("cubo", "h_max", 1, 0, 179), ("cubo", "s_min", 5, 0, 255),
     ("cubo", "v_min", 5, 0, 255), ("cubo", "area_min", 20, 10, 20000), ("cubo", "solidez_min", 0.05, 0.3, 1.0),
     ("cubo", "aspecto_max", 0.1, 1.0, 6.0),
-    ("moneda", "radio_min", 1, 2, 100), ("moneda", "radio_max", 1, 3, 200), ("moneda", "param2", 1, 5, 80),
-    ("moneda", "contraste_min", 1, 0, 120),
-    ("generico", "umbral", 1, 5, 150), ("generico", "area_min", 20, 20, 50000),
-    ("generico", "alargamiento_max", 0.2, 1.0, 20.0),
+    ("moneda", "activo", None, 0, 1), ("moneda", "radio_min", 1, 2, 100), ("moneda", "radio_max", 1, 3, 200),
+    ("moneda", "param2", 1, 5, 80), ("moneda", "contraste_min", 1, 0, 120),
     (None, "cuadros_estable", 1, 1, 50),
 ]
 
 CLASSES = {
     # clase: (etiqueta, color BGR, prioridad)
-    "cubo": ("CUBO NARANJA", (0, 140, 255), 3),
-    "moneda": ("MONEDA", (0, 215, 255), 2),
+    # Todas se muestran como "OBJETO": la clase solo indica qué detector lo encontró.
+    "cubo": ("OBJETO", (0, 140, 255), 3),
+    "moneda": ("OBJETO", (0, 215, 255), 2),
     "generico": ("OBJETO", (255, 80, 255), 1),
 }
 
@@ -226,7 +233,7 @@ class Detector:
             tx, ty, tw, th = t.bbox
             tcx, tcy = tx + tw / 2, ty + th / 2
             for i, d in enumerate(dets):
-                if i in used or d.cls != t.cls:
+                if i in used:  # se asocia aunque cambie el detector (naranja <-> genérico)
                     continue
                 x, y, w, h = d.bbox
                 dist = np.hypot(x + w / 2 - tcx, y + h / 2 - tcy)
@@ -237,6 +244,8 @@ class Detector:
                 d = dets[best]
                 used.add(best)
                 t.bbox, t.contour = d.bbox, d.contour
+                if CLASSES[d.cls][2] > CLASSES[t.cls][2]:
+                    t.cls = d.cls
                 t.hits += 1
                 t.misses = 0
             else:

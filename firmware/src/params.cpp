@@ -22,7 +22,7 @@ const ParamDef PARAM_DEFS[PARAM_COUNT] = {
     {"LOWBAT_WARN", 10.5f, 6.0f, 13.0f},       // V
     {"LOWBAT_CRIT", 9.9f, 6.0f, 13.0f},        // V
     {"SURFACE_LINKLOSS", 15.0f, 1.0f, 300.0f}, // s
-    {"SURFACE_LOWBAT", 10.0f, 1.0f, 300.0f},   // s
+    {"SURFACE_LOWBAT", 10.0f, 1.0f, 300.0f},   // s (SIN USO desde 21 oct: no hay emersión por batería)
     {"WATER_DENSITY", 997.0f, 990.0f, 1030.0f},// kg/m³
     {"MOTOR_MIN_DUTY", 0.08f, 0.0f, 0.5f},     // fracción (arranque ~10 % con decaimiento lento, 21 oct)
     {"RAMP_PER_S", 3.0f, 0.2f, 50.0f},         // escala completa por segundo

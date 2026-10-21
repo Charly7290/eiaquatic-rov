@@ -86,6 +86,7 @@ class App:
         self.banner: tuple[str, tuple, float] | None = None
         self.toast: tuple[str, float] | None = None
         self.confirmed_ids: set[int] = set()
+        self.vision_on = True  # False = solo video para navegar (sin detección ni contornos)
         self.last_confirm: dict | None = None
         self.frozen_roi: np.ndarray | None = None
         self.frozen_until = 0.0
@@ -205,6 +206,9 @@ class App:
         elif self.panel == "vision":
             sec, key, step, lo, hi = TUNABLE[self.panel_sel]
             d = self.detector.cfg[sec] if sec else self.detector.cfg
+            if step is None:  # interruptor: − apaga, + enciende
+                d[key] = direction > 0
+                return
             v = d[key] + direction * mult * step
             v = min(hi, max(lo, v))
             d[key] = round(v, 4) if isinstance(step, float) else int(v)
@@ -214,8 +218,14 @@ class App:
     def handle(self, action: str) -> None:
         if action != "salir":
             self.esc_t = 0.0
-        if self.panel and action in ("arriba", "abajo", "arriba10", "abajo10", "izq", "der", "izq10", "der10",
-                                     "guardar", "siguiente_mascara"):
+        if action == "nada":
+            return
+        if action.startswith("sel:"):
+            if self.panel in ("params", "vision"):
+                self.panel_sel = int(action[4:]) % self._panel_rows()
+            return
+        if self.panel in ("params", "vision") and action in ("arriba", "abajo", "arriba10", "abajo10", "izq", "der",
+                                                             "izq10", "der10", "guardar", "siguiente_mascara"):
             n = self._panel_rows()
             mult = 10 if action.endswith("10") else 1
             if action.startswith("arriba"):
@@ -276,10 +286,18 @@ class App:
         elif action.startswith("pot:"):
             self.power = int(action[4:])
             self.say(f"Potencia {self.power} %", 1.2)
-        elif action in ("panel_params", "panel_vision"):
-            want = "params" if action == "panel_params" else "vision"
+        elif action in ("panel_params", "panel_vision", "panel_ayuda"):
+            want = action[len("panel_"):]  # params | vision | ayuda
             self.panel = None if self.panel == want else want
             self.panel_sel = 0
+        elif action == "panel_cerrar":
+            self.panel = None
+        elif action == "vision":
+            self.vision_on = not self.vision_on
+            if not self.vision_on:
+                self.tracks, self.detector.tracks = [], []
+            self.say("Detección ACTIVADA" if self.vision_on
+                     else "Detección APAGADA: solo video (A sigue marcando hallazgos manuales)")
         elif action == "grabar":
             if self.session.recording:
                 self.session.stop_recording()
@@ -328,10 +346,20 @@ class App:
         try:
             while self.running:
                 events = pygame.event.get()
+                mouse_actions = []
                 for ev in events:
                     if ev.type == pygame.QUIT:
                         self.running = False
+                    elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                        act = self.ui.hit(ev.pos)
+                        if act:
+                            if act in ("izq", "der") and pygame.key.get_mods() & pygame.KMOD_SHIFT:
+                                act += "10"
+                            mouse_actions.append(act)
+                    elif ev.type == pygame.MOUSEWHEEL and self.panel in ("params", "vision"):
+                        mouse_actions.append("arriba" if ev.y > 0 else "abajo")
                 axes, actions = self.controls.update(events)
+                actions = mouse_actions + actions
                 if self.demo_seconds is not None:  # prueba automática sin pantalla
                     el = time.monotonic() - t_start
                     for at, act in ((1.0, "armar"), (2.5, "confirmar"), (3.0, "temperatura"), (3.5, "hold_prof"),
@@ -356,7 +384,7 @@ class App:
                     self.video_status = self.video.status
                     if frame is not None and fid != self.frame_id:
                         self.frame, self.frame_id = frame, fid
-                        self.tracks = self.detector.process(frame)
+                        self.tracks = self.detector.process(frame) if self.vision_on else []
                         self.session.write_raw(frame)
                 else:
                     self.video_status = "desactivado"
