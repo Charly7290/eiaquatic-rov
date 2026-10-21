@@ -7,7 +7,7 @@ namespace ctl {
 inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 // --------------------------------------------------------------- Mezclador horizontal
-// 4 propulsores alineados, 2 por lado. out = {M1 izq-del, M2 izq-tras, M3 der-del, M4 der-tras}.
+// 4 propulsores alineados, 2 por lado. out = {M1 izq-inf, M2 izq-sup, M3 der-sup, M4 der-inf}.
 // surge, yaw en -1..1 (yaw + = girar a la derecha); power en 0..1.
 void mixHorizontal(float surge, float yaw, float power, float out[4]);
 

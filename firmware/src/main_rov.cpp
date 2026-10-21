@@ -69,6 +69,9 @@ static uint32_t lastBaroMs = 0;
 static float waterTempC = NAN;
 static bool tempOk = false;
 static uint32_t tempReqMs = 0;
+static uint32_t tempGoodMs = 0;          // última lectura válida
+static uint16_t tempBadCount = 0;        // lecturas inválidas (diagnóstico)
+#define TEMP_HOLD_MS 5000                // se conserva la última lectura válida hasta 5 s
 
 // Batería
 static float vbatFast = 0, vbatSlow = 0;
@@ -225,8 +228,15 @@ static void readTemperature(uint32_t now) {
   float t = ds18.getTempCByIndex(0);
   // 85.00 es el valor de encendido del DS18B20 (conversión no completada): no es una lectura válida.
   // En el agua nunca se llega a 80 °C, así que el rango ya lo excluye; se deja explícito por claridad.
-  tempOk = (t != DEVICE_DISCONNECTED_C) && t != 85.0f && t > -20.0f && t < 80.0f;
-  if (tempOk) waterTempC = t;
+  bool valid = (t != DEVICE_DISCONNECTED_C) && t != 85.0f && t > -20.0f && t < 80.0f;
+  if (valid) {
+    waterTempC = t;
+    tempGoodMs = now;
+  } else {
+    tempBadCount++;
+  }
+  // Una lectura inválida suelta no tumba el sensor: se mantiene la última buena hasta TEMP_HOLD_MS.
+  tempOk = tempGoodMs != 0 && (now - tempGoodMs) <= TEMP_HOLD_MS;
   ds18.requestTemperatures();  // no bloquea (setWaitForConversion(false))
   tempReqMs = now;
 }
@@ -284,8 +294,8 @@ static void control(uint32_t now, float dt) {
   updateBattery(dt);
   surfacing = lowbatSurface || (lastCmdMs != 0 && linkLostS >= P(P_SURFACE_LINKLOSS));
 
-  limFull = digitalRead(PIN_LIM_FULL) == HIGH;
-  limEmpty = digitalRead(PIN_LIM_EMPTY) == HIGH;
+  limFull = digitalRead(PIN_LIM_FULL) == LIM_PRESSED_LEVEL;
+  limEmpty = digitalRead(PIN_LIM_EMPTY) == LIM_PRESSED_LEVEL;
 
   float surge = cmd.surge / 1000.0f, yaw = cmd.yaw / 1000.0f;
   float pitchIn = cmd.pitch / 1000.0f, vert = cmd.vert / 1000.0f;
@@ -353,10 +363,10 @@ static void control(uint32_t now, float dt) {
 #if DEBUG_PRINTS
 static void debugPrint() {
   DBG("[%lus] link=%d arm=%d hold(p=%d d=%d) depth=%.3f sp=%.3f vz=%.3f pitch=%.1f roll=%.1f T=%.2f V=%.2f "
-      "lastre=%d pos=%s%.0f%% lim(F=%d E=%d) surf=%d err=%lu\n",
+      "lastre=%d pos=%s%.0f%% lim(F=%d E=%d) surf=%d err=%lu Tbad=%u\n",
       (unsigned long)(millis() / 1000), linkOk, armed, pitchHoldOn, depthHoldOn, depthM, depthHold.setpoint, vzMs,
       att.pitch - P(P_IMU_PITCH_OFS), att.roll - P(P_IMU_ROLL_OFS), waterTempC, vbatFast, ballast.dir,
-      ballast.posKnown ? "" : "~", ballast.pos * 100, limFull, limEmpty, surfacing, (unsigned long)rovLink.errors());
+      ballast.posKnown ? "" : "~", ballast.pos * 100, limFull, limEmpty, surfacing, (unsigned long)rovLink.errors(), tempBadCount);
 }
 #endif
 

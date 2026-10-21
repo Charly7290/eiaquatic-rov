@@ -70,7 +70,7 @@ class _DepthHold:
 class SimROV:
     POOL_DEPTH = 2.0
     TRUE_NEUTRAL = 0.55  # posición del lastre con flotabilidad neutra (desconocida para el control)
-    STROKE_TRUE = 20.0
+    STROKE_TRUE = 14.5
 
     def __init__(self) -> None:
         self.parser = P.Parser()

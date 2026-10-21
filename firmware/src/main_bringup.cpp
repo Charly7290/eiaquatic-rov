@@ -26,14 +26,14 @@ static float p0Mbar = 0;
 static uint32_t tStream = 0, tImu = 0, tTemp = 0;
 static float waterTemp = NAN;
 
-static const char* MOTOR_NAMES[MOTOR_COUNT] = {"M1 izq-delantero", "M2 izq-trasero", "M3 der-delantero",
-                                               "M4 der-trasero",   "M5 cabeceo",     "M6 lastre"};
+static const char* MOTOR_NAMES[MOTOR_COUNT] = {"M1 izq-inferior", "M2 izq-superior", "M3 der-superior",
+                                               "M4 der-inferior",   "M5 cabeceo",     "M6 lastre"};
 static const char* MOTOR_EXPECT[MOTOR_COUNT] = {
     "empujar el ROV hacia ADELANTE", "empujar el ROV hacia ADELANTE", "empujar el ROV hacia ADELANTE",
     "empujar el ROV hacia ADELANTE", "LEVANTAR la nariz",             "LLENAR el lastre (tomar agua)"};
 
-static bool limFull() { return digitalRead(PIN_LIM_FULL) == HIGH; }
-static bool limEmpty() { return digitalRead(PIN_LIM_EMPTY) == HIGH; }
+static bool limFull() { return digitalRead(PIN_LIM_FULL) == LIM_PRESSED_LEVEL; }
+static bool limEmpty() { return digitalRead(PIN_LIM_EMPTY) == LIM_PRESSED_LEVEL; }
 static float vbat() { return analogReadMilliVolts(PIN_VBAT) * VBAT_DIVIDER / 1000.0f; }
 
 // Lee el serial sin bloquear: true si llegó 'x' (abortar).
@@ -135,7 +135,7 @@ static void jogBallast(int dir) {
 // Mueve el lastre hasta el switch indicado. Devuelve el tiempo en s, o -1 si timeout/abortado.
 static float runToLimit(int dir, uint32_t timeoutMs) {
   if (limFull() && limEmpty()) {
-    Serial.println(F("  ¡Ambos switches en ALTO! Revise el cableado (COM/NC)."));
+    Serial.println(F("  ¡Ambos switches activos a la vez! Revise el cableado y LIM_PRESSED_LEVEL (config.h)."));
     return -1;
   }
   bool (*lim)() = dir > 0 ? limFull : limEmpty;

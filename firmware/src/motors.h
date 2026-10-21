@@ -1,4 +1,4 @@
-// AquaBot — PWM de los 6 DRV8871 (PWM en IN1/IN2, decaimiento rápido).
+// AquaBot — PWM de los 6 DRV8871 (PWM en IN1/IN2; decaimiento lento o rápido según MOTOR_SLOW_DECAY).
 #pragma once
 #include <stdint.h>
 

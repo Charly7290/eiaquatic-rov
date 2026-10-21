@@ -48,16 +48,23 @@ void motorSet(uint8_t m, float v, float minDuty) {
     duty = (uint32_t)(a * PWM_MAX + 0.5f);
     if (duty > PWM_MAX) duty = PWM_MAX;
   }
-  if (duty == 0) {
+  if (duty == 0) {  // ambos en bajo: motor libre (coast)
     pwmWrite(m, 0, 0);
     pwmWrite(m, 1, 0);
-  } else if (v > 0) {
-    pwmWrite(m, 1, 0);
-    pwmWrite(m, 0, duty);
-  } else {
-    pwmWrite(m, 0, 0);
-    pwmWrite(m, 1, duty);
+    return;
   }
+  uint8_t on = v > 0 ? 0 : 1;  // entrada que define el sentido
+#if MOTOR_SLOW_DECAY
+  // Decaimiento lento: la entrada del sentido queda en ALTO y la otra conmuta. En el tiempo "apagado"
+  // las dos quedan en alto (freno) y la corriente del motor recircula en vez de caer a cero, así que
+  // el motor arranca con mucho menos duty y la respuesta al stick es casi lineal.
+  pwmWrite(m, on, PWM_MAX);              // PWM_MAX = siempre en alto (core 2.x)
+  pwmWrite(m, 1 - on, PWM_MAX - duty);   // en bajo durante la fracción "duty"
+#else
+  // Decaimiento rápido: la otra entrada en bajo; en el tiempo apagado el motor queda libre.
+  pwmWrite(m, 1 - on, 0);
+  pwmWrite(m, on, duty);
+#endif
 }
 
 void motorsStopAll() {

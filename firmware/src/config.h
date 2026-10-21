@@ -15,8 +15,10 @@
 #define FRAME_GAP_MS     20   // un hueco mayor entre bytes reinicia el parser
 
 // ---------------------------------------------------------------- Motores
-// Índices: M1 izq-delantero, M2 izq-trasero, M3 der-delantero, M4 der-trasero,
-//          M5 cabeceo (vertical frontal), M6 lastre.
+// Índices (vistos desde atrás del ROV, verificado en bring-up 21 oct):
+//   M1 izq-inferior, M2 izq-superior, M3 der-superior, M4 der-inferior,
+//   M5 cabeceo (vertical frontal), M6 lastre.
+// (Los nombres del enum M_LF/M_LR/M_RF/M_RR son históricos: solo importa el lado izq/der.)
 enum MotorId : uint8_t { M_LF = 0, M_LR = 1, M_RF = 2, M_RR = 3, M_PITCH = 4, M_BALLAST = 5, MOTOR_COUNT = 6 };
 
 // {IN1, IN2} de cada DRV8871 (pinout aprobado, sección 4.2b del estado del proyecto).
@@ -33,7 +35,12 @@ static const uint8_t MOTOR_PINS[MOTOR_COUNT][2] = {
 //  - M1..M4: con comando positivo deben empujar el ROV hacia ADELANTE.
 //  - M5:     con comando positivo debe LEVANTAR la nariz.
 //  - M6:     con comando positivo debe LLENAR el lastre (tomar agua).
-static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, +1, +1, +1, +1};
+// Bring-up 21 oct: M3 y M4 salieron invertidos.
+static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, -1, -1, +1, +1};
+
+// Modo de PWM del DRV8871. 1 = decaimiento lento (recomendado: con rápido, los BM70 no arrancaban
+// por debajo de ~60 % de duty, bring-up 21 oct). 0 = decaimiento rápido (comportamiento anterior).
+#define MOTOR_SLOW_DECAY 1
 
 #define PWM_FREQ_HZ  20000
 #define PWM_BITS     10
@@ -47,8 +54,12 @@ static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, +1, +1, +1, +1};
 #define MPU6050_ADDR     0x68
 #define PIN_DS18B20      5
 
-// Microswitches del lastre (COM al GPIO con 10k a 3V3, NC a GND):
-// LOW = libre, HIGH = fin de carrera alcanzado o cable roto.
+// Microswitches del lastre (GPIO34/35 con 10k a 3V3; el switch conecta a GND).
+// LIM_PRESSED_LEVEL = nivel que lee el pin con el switch PRESIONADO:
+//   HIGH -> cableado COM/NC (recomendado: un cable roto también detiene el motor).
+//   LOW  -> cableado COM/NO (cableado actual, 21 oct): presionado = 0, libre = 1.
+//           Ojo: con NO, un cable suelto se lee como "libre" y el motor no se detiene en el tope.
+#define LIM_PRESSED_LEVEL LOW
 #define PIN_LIM_FULL     34   // switch A: lastre LLENO  (detiene el llenado)
 #define PIN_LIM_EMPTY    35   // switch B: lastre VACÍO  (detiene el vaciado)
 
@@ -62,6 +73,7 @@ static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, +1, +1, +1, +1};
 // Cada entrada = {eje del sensor (0=x, 1=y, 2=z), signo}. Se verifica con el bring-up:
 // ROV nivelado -> az ≈ +1 g; nariz arriba -> pitch positivo; lado derecho abajo -> roll positivo.
 // Montaje en el ROV (16 oct): +Z del sensor hacia la proa, +X hacia arriba, Y hacia los lados.
+// Signos verificados en bring-up (21 oct): nariz arriba -> pitch +, lado derecho abajo -> roll +.
 // LEFT sale de la regla de la mano derecha: izquierda = arriba × adelante = X × Z = −Y.
 static const int8_t IMU_MAP_FWD[2]  = {2, +1};
 static const int8_t IMU_MAP_LEFT[2] = {1, -1};

@@ -17,24 +17,24 @@ const ParamDef PARAM_DEFS[PARAM_COUNT] = {
     {"DEPTH_KV", 0.5f, 0.0f, 5.0f},            // carrera/(m/s)   velocidad -> lastre
     {"DEPTH_KI", 0.15f, 0.0f, 2.0f},           // carrera/(m/s·s) aprende el neutro
     {"HOLD_RATE", 0.10f, 0.0f, 1.0f},          // m/s
-    {"BALLAST_STROKE", 20.0f, 1.0f, 120.0f},   // s
-    {"BALLAST_TIMEOUT", 40.0f, 2.0f, 240.0f},  // s
+    {"BALLAST_STROKE", 14.5f, 1.0f, 120.0f},   // s (medido con agua a 8.4 V, 21 oct)
+    {"BALLAST_TIMEOUT", 27.0f, 2.0f, 240.0f},  // s (1.5 x carrera + 5)
     {"LOWBAT_WARN", 10.5f, 6.0f, 13.0f},       // V
     {"LOWBAT_CRIT", 9.9f, 6.0f, 13.0f},        // V
     {"SURFACE_LINKLOSS", 15.0f, 1.0f, 300.0f}, // s
     {"SURFACE_LOWBAT", 10.0f, 1.0f, 300.0f},   // s
     {"WATER_DENSITY", 997.0f, 990.0f, 1030.0f},// kg/m³
-    {"MOTOR_MIN_DUTY", 0.0f, 0.0f, 0.5f},      // fracción
+    {"MOTOR_MIN_DUTY", 0.08f, 0.0f, 0.5f},     // fracción (arranque ~10 % con decaimiento lento, 21 oct)
     {"RAMP_PER_S", 3.0f, 0.2f, 50.0f},         // escala completa por segundo
-    {"VBAT_CAL", 1.0f, 0.8f, 1.2f},            // factor
-    {"IMU_PITCH_OFS", 0.0f, -45.0f, 45.0f},    // °
-    {"IMU_ROLL_OFS", 0.0f, -45.0f, 45.0f},     // °
+    {"VBAT_CAL", 0.990f, 0.8f, 1.2f},          // factor (multímetro 11.41 V / ESP32 11.53 V, 21 oct)
+    {"IMU_PITCH_OFS", -5.9f, -45.0f, 45.0f},   // ° (montaje, ROV nivelado en banco 21 oct; afinar con L)
+    {"IMU_ROLL_OFS", -1.0f, -45.0f, 45.0f},    // ° (ídem)
 };
 
 static float values[PARAM_COUNT];
 static Preferences prefs;
 static const char* NS = "aquabot";
-static const uint32_t PARAMS_VERSION = 2;
+static const uint32_t PARAMS_VERSION = 5;  // 3: carrera lastre; 4: MOTOR_MIN_DUTY; 5: VBAT_CAL y nivel IMU
 
 void paramsBegin() {
   for (int i = 0; i < PARAM_COUNT; i++) values[i] = PARAM_DEFS[i].def;
