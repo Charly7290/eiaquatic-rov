@@ -29,6 +29,7 @@ CF_PITCH_HOLD = 1 << 1
 CF_DEPTH_HOLD = 1 << 2
 CF_ZERO_DEPTH = 1 << 3
 CF_LEVEL_IMU = 1 << 4
+CF_REPLY = 1 << 5  # el ROV responde con telemetría solo a los comandos que lo piden
 
 # Banderas de telemetría
 TF_ARMED = 1 << 0

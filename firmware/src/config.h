@@ -8,7 +8,7 @@
 #ifndef LINK_USB
 #define LINK_USB 0
 #endif
-#define LINK_BAUD        115200
+#define LINK_BAUD        38400   // 22 oct: bajado de 115200; bits 3x más largos = más tolerancia al ruido de motores. DEBE coincidir con "baudios" en pc/config.json
 #define PIN_RS485_RX     16   // RO del transceptor (con divisor si es MAX485 a 5 V)
 #define PIN_RS485_TX     17   // DI
 #define PIN_RS485_DE     4    // DE + RE# unidos: HIGH transmite, LOW recibe
@@ -42,7 +42,7 @@ static const int8_t MOTOR_DIR[MOTOR_COUNT] = {+1, +1, -1, -1, +1, +1};
 // por debajo de ~60 % de duty, bring-up 21 oct). 0 = decaimiento rápido (comportamiento anterior).
 #define MOTOR_SLOW_DECAY 1
 
-#define PWM_FREQ_HZ  20000
+#define PWM_FREQ_HZ  20000  // (22 oct: se probó 5 kHz y el enlace perdió más; se vuelve a 20 kHz)
 #define PWM_BITS     10
 #define PWM_MAX      ((1u << PWM_BITS) - 1)
 

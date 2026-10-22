@@ -175,7 +175,9 @@ static void handleFrame(uint32_t now) {
         paramSet(P_IMU_ROLL_OFS, att.roll);
         paramsSave();
       }
-      sendTelemetry();
+      // Comandos redundantes (22 oct): el PC envía 40 comandos/s y pide telemetría solo en algunos.
+      // Así un comando dañado por ruido se repone 25 ms después y el bus pasa más tiempo en silencio.
+      if (cmd.flags & proto::CF_REPLY) sendTelemetry();
       break;
     }
     case proto::PARAM_SET: {

@@ -1,7 +1,7 @@
 {
   "puerto": "/dev/ttyUSB0",
-  "baudios": 115200,
-  "frecuencia_cmd_hz": 20,
+  "baudios": 38400,
+  "frecuencia_cmd_hz": 40,
   "video": {
     "dispositivo": 4,
     "ancho": 720,

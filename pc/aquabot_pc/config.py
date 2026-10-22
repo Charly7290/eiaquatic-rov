@@ -16,8 +16,8 @@ from .detection import DEFAULT_CFG as DETECTION_DEFAULTS
 
 DEFAULTS: dict = {
     "puerto": "COM5" if sys.platform.startswith("win") else "/dev/ttyUSB0",
-    "baudios": 115200,
-    "frecuencia_cmd_hz": 20,
+    "baudios": 38400,
+    "frecuencia_cmd_hz": 40,
     "video": {
         "dispositivo": 4,      # índice de la capturadora (/dev/video4 en el portátil de piloteo)
         "ancho": 720,

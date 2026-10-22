@@ -28,6 +28,7 @@ enum CmdFlag : uint8_t {
   CF_DEPTH_HOLD = 1 << 2,
   CF_ZERO_DEPTH = 1 << 3,  // flanco de subida
   CF_LEVEL_IMU = 1 << 4,   // flanco de subida, solo desarmado
+  CF_REPLY = 1 << 5,       // 22 oct: responder con telemetría solo si el PC la pide (comandos redundantes)
 };
 
 enum TelFlag : uint16_t {

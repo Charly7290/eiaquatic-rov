@@ -148,7 +148,8 @@ class SimROV:
                 self.p0 = self._pressure_mbar()
             if rising & P.CF_LEVEL_IMU and not self.armed:
                 self.params[21], self.params[22] = self.pitch, self.roll
-            self._send(P.TELEM, self._telemetry().pack())
+            if self.cmd.flags & P.CF_REPLY:
+                self._send(P.TELEM, self._telemetry().pack())
         elif mtype == P.PARAM_SET and len(payload) == 6:
             pid, _save, value = struct.unpack(P.PARAM_SET_FMT, payload)
             if pid < len(P.PARAMS):

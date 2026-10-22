@@ -88,6 +88,7 @@ class LinkStats:
     timeouts: int = 0
     rtt_ms: float = 0.0
     rate_hz: float = 0.0
+    cmd_only: int = 0  # comandos enviados sin pedir respuesta
 
 
 class Link(threading.Thread):
@@ -96,6 +97,7 @@ class Link(threading.Thread):
         super().__init__(daemon=True, name="enlace")
         self.transport = transport
         self.period = 1.0 / rate_hz
+        self.reply_every = max(1, round(rate_hz / 10.0))  # telemetría a ~10 Hz
         self.on_telemetry = on_telemetry
         self.parser = P.Parser()
         self.stats = LinkStats()
@@ -158,6 +160,13 @@ class Link(threading.Thread):
                         del self._pulses[f]
                 cmd = replace(self._cmd, seq=seq, flags=flags)
             seq = (seq + 1) & 0xFF
+            # Comandos redundantes: se envían a la frecuencia configurada (40/s) y solo uno de cada
+            # `reply_every` pide telemetría (~10/s). Los demás salen sin esperar respuesta.
+            if (seq % self.reply_every) != 0:
+                self.transport.write(P.encode(P.CMD, cmd.pack()))
+                self.stats.cmd_only += 1
+                continue
+            cmd = replace(cmd, flags=cmd.flags | P.CF_REPLY)
             got = self._exchange(P.encode(P.CMD, cmd.pack()), expect=P.TELEM, cmd=cmd)
             if got:
                 n_rate += 1

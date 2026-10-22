@@ -531,7 +531,8 @@ class UI:
         rect = pygame.Rect(x, ys[3], w, heights[3])
         self.card(rect, "attitude", "ACTITUD · CABECEO")
         phold = t.has(P.TF_PITCH_HOLD)
-        lbl, col = self._mode(app.pitch_hold, phold, "armar")
+        why = "IMU" if not t.has(P.TF_IMU_OK) else ("armar" if not t.has(P.TF_ARMED) else "ROV")
+        lbl, col = self._mode(app.pitch_hold, phold, why)
         self.chip(lbl, (rect.right - 14, rect.y + 12), col, "right")
         r_h = 50
         hc = (rect.x + 16 + r_h, rect.y + 48 + r_h)
