@@ -67,23 +67,50 @@ float PitchPID::update(float sp, float pitch, float rate, float dt, const PitchG
 }
 
 int8_t Ballast::update(int8_t request, bool limFull, bool limEmpty, float dt, float strokeS, float timeoutS) {
-  switchFault = limFull && limEmpty;
-  if (!switchFault) {
-    if (limFull) {
-      pos = 1.0f;
-      posKnown = true;
-    } else if (limEmpty) {
-      pos = 0.0f;
-      posKnown = true;
+  // --- Interpretación de los switches, a prueba de cableado:
+  //  · uno activo: normal.
+  //  · los dos activos (p. ej. pull-ups sin 3V3: al presionar uno caen los dos): es el tope hacia el que
+  //    se movía el pistón al activarse; si estaba quieto, el más cercano según la posición estimada.
+  //  · si siguen los dos activos aunque el pistón lleva >2 s alejándose de ese tope, las lecturas no
+  //    son confiables (switch pegado o cable a GND): se ignoran y protege el timeout.
+  bool both = limFull && limEmpty;
+  if (both && !prevBoth_) {
+    // Quieto: si la posición es conocida, el tope más cercano; si no (recién encendido), VACÍO,
+    // que es donde arranca normalmente el ROV (y adonde lo lleva la emersión por pérdida de enlace).
+    ambigSide_ = lastMove_ != 0 ? lastMove_ : ((posKnown && pos >= 0.5f) ? 1 : -1);
+    awayTime_ = 0;
+    switchFault = false;
+  }
+  if (!both) {
+    awayTime_ = 0;
+    switchFault = false;
+  }
+  prevBoth_ = both;
+
+  bool full = limFull, empty = limEmpty;
+  if (both) {
+    if (switchFault) {
+      full = empty = false;
+    } else {
+      full = ambigSide_ > 0;
+      empty = !full;
     }
+  }
+
+  if (full) {
+    pos = 1.0f;
+    posKnown = true;
+  } else if (empty) {
+    pos = 0.0f;
+    posKnown = true;
   }
 
   if (request == 0) timeoutFault = false;
 
   int8_t out = request;
-  if (switchFault || timeoutFault) out = 0;
-  if (out > 0 && limFull) out = 0;
-  if (out < 0 && limEmpty) out = 0;
+  if (timeoutFault) out = 0;
+  if (out > 0 && full) out = 0;
+  if (out < 0 && empty) out = 0;
 
   if (out != 0) {
     if (out != dir) runTime_ = 0;
@@ -95,8 +122,17 @@ int8_t Ballast::update(int8_t request, bool limFull, bool limEmpty, float dt, fl
   }
   if (out == 0) runTime_ = 0;
 
+  // ¿se aleja del tope interpretado y los dos siguen activos? -> lecturas no confiables
+  if (both && !switchFault && out != 0 && out == -ambigSide_) {
+    awayTime_ += dt;
+    if (awayTime_ > 2.0f) switchFault = true;
+  }
+
   if (out != 0 && strokeS > 0.1f) pos = clampf(pos + out * dt / strokeS, 0.0f, 1.0f);
+  if (out != 0) lastMove_ = out;
   dir = out;
+  atFull = full;
+  atEmpty = empty;
   return out;
 }
 

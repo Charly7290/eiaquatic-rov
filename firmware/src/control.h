@@ -49,11 +49,19 @@ class Ballast {
   float pos = 0.5f;          // 0 = vacío, 1 = lleno (estimada)
   bool posKnown = false;
   bool timeoutFault = false;  // marcha continua demasiado larga; se limpia al soltar el pedido
-  bool switchFault = false;   // ambos switches en ALTO (cable roto / falla)
+  bool switchFault = false;   // los dos switches siguen activos aunque el pistón se alejó: lecturas
+                              // no confiables, se ignoran (solo aviso; protege el timeout)
+  bool atFull = false, atEmpty = false;  // topes ya interpretados (lo que se reporta al PC)
   int8_t dir = 0;
 
  private:
   float runTime_ = 0;
+  // Los dos switches activos a la vez (22 oct: pull-ups sin 3V3 -> al presionar uno bajan los dos).
+  // Se decide cuál es por el sentido en que se movía el pistón al activarse.
+  bool prevBoth_ = false;
+  int8_t ambigSide_ = 0;      // +1 = se toma como LLENO, -1 = VACÍO
+  int8_t lastMove_ = 0;       // último sentido de marcha distinto de 0
+  float awayTime_ = 0;        // tiempo alejándose del tope mientras siguen los dos activos
 };
 
 // --------------------------------------------------------------- Hold de profundidad

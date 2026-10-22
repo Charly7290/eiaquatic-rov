@@ -99,7 +99,36 @@ static void testBallast() {
   for (int i = 0; i < 250; i++) b.update(-1, false, false, 0.02f, 20, 40);  // 5 s
   CHECK(fabsf(b.pos - 0.75f) < 0.01f, "posición estimada %.3f", b.pos);
   out = b.update(-1, true, true, 0.02f, 20, 40);
-  CHECK(out == 0 && b.switchFault, "ambos switches = falla");
+  CHECK(out == 0 && b.atEmpty && !b.atFull && b.pos == 0.0f, "ambos activos vaciando = tope VACÍO");
+
+  // Pull-ups sin 3V3 (22 oct): al presionar cualquiera se activan los dos.
+  ctl::Ballast s;
+  for (int i = 0; i < 50; i++) s.update(+1, false, false, 0.02f, 20, 40);  // llenando
+  out = s.update(+1, true, true, 0.02f, 20, 40);
+  CHECK(out == 0 && s.atFull && !s.atEmpty && s.pos == 1.0f, "ambos al llenar = LLENO");
+  out = s.update(-1, true, true, 0.02f, 20, 40);
+  CHECK(out == -1, "desde LLENO se puede vaciar aunque sigan los dos");
+  for (int i = 0; i < 10; i++) out = s.update(-1, false, false, 0.02f, 20, 40);  // se suelta
+  out = s.update(-1, true, true, 0.02f, 20, 40);
+  CHECK(out == 0 && s.atEmpty, "ambos al vaciar = VACÍO");
+  out = s.update(+1, true, true, 0.02f, 20, 40);
+  CHECK(out == 1, "desde VACÍO se puede llenar");
+
+  // Switches pegados (siempre los dos activos): no bloquea para siempre.
+  ctl::Ballast z;  // recién encendido, en el tope VACÍO (activa los dos): debe dejar llenar
+  out = z.update(+1, true, true, 0.02f, 20, 40);
+  CHECK(out == 1 && z.atEmpty && !z.atFull, "al encender con los dos activos se toma VACÍO");
+
+  ctl::Ballast k;
+  k.pos = 0.9f;
+  k.posKnown = true;
+  out = k.update(+1, true, true, 0.02f, 20, 40);  // quieto, posición conocida cerca de lleno -> LLENO
+  CHECK(out == 0, "pegados: quieto con posición conocida se toma el tope más cercano");
+  for (int i = 0; i < 120; i++) out = k.update(-1, true, true, 0.02f, 20, 40);  // 2.4 s alejándose
+  CHECK(k.switchFault && !k.atFull && !k.atEmpty, "pegados: se ignoran tras 2 s");
+  out = k.update(0, true, true, 0.02f, 20, 40);
+  out = k.update(+1, true, true, 0.02f, 20, 40);
+  CHECK(out == 1, "pegados: se puede mover en ambos sentidos (protege el timeout)");
   ctl::Ballast t;
   for (int i = 0; i < 300; i++) out = t.update(+1, false, false, 0.02f, 20, 5);  // 6 s > 5 s
   CHECK(out == 0 && t.timeoutFault, "timeout");

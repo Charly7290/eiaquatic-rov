@@ -115,8 +115,8 @@ static void sendTelemetry() {
   if (surfacing) f |= proto::TF_SURFACING;
   if (lowWarn) f |= proto::TF_LOWBAT_WARN;
   if (lowCrit) f |= proto::TF_LOWBAT_CRIT;
-  if (limFull) f |= proto::TF_LIM_FULL;
-  if (limEmpty) f |= proto::TF_LIM_EMPTY;
+  if (ballast.atFull) f |= proto::TF_LIM_FULL;   // topes ya interpretados (ver Ballast::update)
+  if (ballast.atEmpty) f |= proto::TF_LIM_EMPTY;
   if (depthValid) f |= proto::TF_DEPTH_OK;
   if (imu.ok()) f |= proto::TF_IMU_OK;
   if (tempOk) f |= proto::TF_TEMP_OK;
