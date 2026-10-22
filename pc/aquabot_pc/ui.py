@@ -74,8 +74,7 @@ class UI:
         self._fonts: dict = {}
         self._icons: dict = {}
         self._mask = self._video_mask()
-        self._errs = 0
-        self._err_t = -99.0
+        self._lq: list[tuple[float, int, int]] = []  # (t, tx, timeouts) para la pérdida del enlace
         self.hits: list[tuple[pygame.Rect, str]] = []  # zonas clicables del último cuadro -> acción
 
     def hit(self, pos) -> str | None:
@@ -669,15 +668,23 @@ class UI:
             x = self.pill("DESARMADO", x, cy - 20, MUTED, "shield")
         x = self.pill(f"POT {app.power}%", x, cy - 20, BLUE, "bolt")
         if app.link.ok:
-            errs = app.link.parser.errors + (t.rx_err if t else 0)
+            # Pérdida real del enlace en los últimos ~5 s: comandos enviados que no tuvieron respuesta.
+            # Una trama dañada suelta se descarta por CRC y no afecta (la siguiente llega 50 ms después),
+            # así que solo se avisa si se pierde más del 5 %.
             now = time.monotonic()
-            if errs != self._errs:
-                self._err_t = now
-            self._errs = errs
-            recent = now - self._err_t < 3.0
-            hz = app.link.stats.rate_hz
-            txt = (f"ENLACE {hz:.0f} Hz" if hz >= 1 else "ENLACE OK") + ("  ·  ERR" if recent else "")
-            x = self.pill(txt, x, cy - 20, YELLOW if recent else GREEN, "signal")
+            st = app.link.stats
+            self._lq.append((now, st.tx, st.timeouts))
+            while len(self._lq) > 2 and now - self._lq[0][0] > 5.0:
+                self._lq.pop(0)
+            t0, tx0, to0 = self._lq[0]
+            loss = (st.timeouts - to0) / max(1, st.tx - tx0) * 100 if now - t0 > 1.0 else 0.0
+            hz = st.rate_hz
+            txt = f"ENLACE {hz:.0f} Hz" if hz >= 1 else "ENLACE OK"
+            col = GREEN
+            if loss >= 5:
+                txt += f"  ·  pierde {loss:.0f}%"
+                col = RED if loss >= 25 else YELLOW
+            x = self.pill(txt, x, cy - 20, col, "signal")
         warns = []
         if not app.link.ok:
             warns.append("SIN ENLACE")

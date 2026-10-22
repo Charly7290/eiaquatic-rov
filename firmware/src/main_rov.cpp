@@ -221,9 +221,24 @@ static void processPressure(uint32_t now) {
   if (dt > 0.001f && dt < 0.5f) vzMs += 0.2f * ((depthM - prev) / dt - vzMs);
 }
 
+// Lectura rápida del único DS18B20 del bus (Skip ROM, sin búsqueda de dirección): ~7 ms bloqueado en vez
+// de ~25 ms con getTempCByIndex(). Un bloqueo largo retrasa la respuesta al PC y aparecía como "pérdida"
+// en el indicador de enlace (21 oct). Se valida con el CRC y con los bits fijos del registro de config.
+static float readDs18Fast() {
+  uint8_t sp[9];
+  if (!oneWire.reset()) return DEVICE_DISCONNECTED_C;  // nadie respondió
+  oneWire.skip();
+  oneWire.write(0xBE);  // READ SCRATCHPAD
+  for (uint8_t i = 0; i < 9; i++) sp[i] = oneWire.read();
+  if (OneWire::crc8(sp, 8) != sp[8]) return DEVICE_DISCONNECTED_C;
+  if ((sp[4] & 0x1F) != 0x1F) return DEVICE_DISCONNECTED_C;  // descarta un bus en 0 (CRC de ceros = 0)
+  int16_t raw = (int16_t)((sp[1] << 8) | sp[0]);
+  return raw / 16.0f;  // 12 bits: 0.0625 °C por cuenta
+}
+
 static void readTemperature(uint32_t now) {
   if (now - tempReqMs < TEMP_PERIOD_MS) return;
-  float t = ds18.getTempCByIndex(0);
+  float t = readDs18Fast();
   // 85.00 es el valor de encendido del DS18B20 (conversión no completada): no es una lectura válida.
   // En el agua nunca se llega a 80 °C, así que el rango ya lo excluye; se deja explícito por claridad.
   bool valid = (t != DEVICE_DISCONNECTED_C) && t != 85.0f && t > -20.0f && t < 80.0f;
@@ -277,7 +292,7 @@ static void updateBattery(float dt) {
 
 static void control(uint32_t now, float dt) {
   // --- Enlace / failsafe
-  linkOk = lastCmdMs != 0 && (now - lastCmdMs) < FAILSAFE_MS;
+  linkOk = lastCmdMs != 0 && (int32_t)(now - lastCmdMs) < (int32_t)FAILSAFE_MS;  // con signo: robusto
   if (!linkOk) {
     if (armed) armBlocked = true;
     armed = false;
@@ -298,24 +313,24 @@ static void control(uint32_t now, float dt) {
   if (!linkOk) surge = yaw = pitchIn = vert = 0;
 
   float target[MOTOR_COUNT] = {0};
-  float scale = lowCrit ? LOWBAT_THRUST_SCALE : 1.0f;
+  // Sin limitación de empuje por batería (decisión del equipo, 21 oct): la batería solo genera avisos.
 
   // --- Horizontales + cabeceo (solo armado)
   pitchHoldOn = armed && (cmd.flags & proto::CF_PITCH_HOLD) && imu.ok();
   if (armed) {
     float h[4];
     ctl::mixHorizontal(surge, yaw, power, h);
-    for (int i = 0; i < 4; i++) target[i] = h[i] * scale;
+    for (int i = 0; i < 4; i++) target[i] = h[i];
 
     if (pitchHoldOn) {
       pitchSp = pitchIn * P(P_PITCH_SP_MAX);
       ctl::PitchGains g = {P(P_PITCH_KP), P(P_PITCH_KI), P(P_PITCH_KD), P(P_PITCH_MAX_OUT)};
       float pitchNow = att.pitch - P(P_IMU_PITCH_OFS);
-      target[M_PITCH] = pitchPid.update(pitchSp, pitchNow, att.pitchRate, dt, g) * scale;
+      target[M_PITCH] = pitchPid.update(pitchSp, pitchNow, att.pitchRate, dt, g);
     } else {
       pitchPid.reset();
       pitchSp = 0;
-      target[M_PITCH] = pitchIn * scale;
+      target[M_PITCH] = pitchIn;
     }
   } else {
     pitchPid.reset();
@@ -407,7 +422,9 @@ void setup() {
 void loop() {
   uint32_t now = millis();
 
-  while (rovLink.poll()) handleFrame(millis());
+  // Mismo 'now' para todo el ciclo: si lastCmdMs quedara 1 ms por delante de 'now', la resta sin
+  // signo daría ~4.29e9 y el ROV se desarmaría solo (falla encontrada el 21 oct).
+  while (rovLink.poll()) handleFrame(now);
 
   baro.update(now);
   if (baro.takeFresh()) processPressure(now);

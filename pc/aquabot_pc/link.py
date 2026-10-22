@@ -15,7 +15,7 @@ from . import protocol as P
 
 log = logging.getLogger(__name__)
 
-RESPONSE_TIMEOUT_S = 0.040
+RESPONSE_TIMEOUT_S = 0.045  # el ciclo es de 50 ms: margen para respuestas algo tardías
 LINK_OK_S = 1.0  # igual al failsafe del ROV (FAILSAFE_MS): antes de eso, un hueco no desarma
 
 
