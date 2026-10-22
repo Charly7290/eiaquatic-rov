@@ -157,7 +157,7 @@ class SyntheticScene:
             tex[r0 : r0 + int(0.25 * self.PPM), :] = (95, 45, 25)
         self.tex = tex
         self.objects = [
-            ("cube", 3.0, 0.8, 0.15, 20), ("cube", 8.0, -1.8, 0.15, 55), ("cube", 12.5, 2.7, 0.15, 10),
+            ("cube", 3.0, 0.8, 0.15, 20), ("pyramid", 8.0, -1.8, 0.15, 55), ("cube", 12.5, 2.7, 0.15, 10),
             ("coin", 2.0, -0.5, 0.0125, 0), ("coin", 2.2, -0.4, 0.0125, 0), ("coin", 6.0, 1.4, 0.012, 0),
             ("coin", 10.0, -0.2, 0.0125, 0), ("rock", 5.0, -1.0, 0.10, 0),
         ]
@@ -188,7 +188,13 @@ class SyntheticScene:
             rad = size * s
             if not (-rad < u < self.W + rad and -rad < v < self.H + rad):
                 continue
-            if kind == "cube":
+            if kind == "pyramid":  # pirámide vista desde arriba: cuadrado con 4 caras de distinto brillo
+                box = cv2.boxPoints(((u, v), (2 * rad, 2 * rad), ang - math.degrees(hdg))).astype(np.int32)
+                apex = (int(u), int(v))
+                for i, shade in enumerate(((20, 125, 250), (15, 100, 215), (10, 80, 180), (18, 112, 232))):
+                    tri = np.array([box[i], box[(i + 1) % 4], apex], np.int32)
+                    cv2.fillConvexPoly(img, tri, shade, cv2.LINE_AA)
+            elif kind == "cube":
                 box = cv2.boxPoints(((u, v), (2 * rad, 2 * rad), ang - math.degrees(hdg)))
                 cv2.fillConvexPoly(img, box.astype(np.int32), (20, 115, 245), cv2.LINE_AA)
                 cv2.polylines(img, [box.astype(np.int32)], True, (10, 70, 170), max(1, int(rad / 8)), cv2.LINE_AA)

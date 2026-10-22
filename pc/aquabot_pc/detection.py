@@ -1,9 +1,10 @@
 """Detección de objetos con visión clásica (OpenCV).
 
-Detector principal: GENÉRICO, cualquier mancha cuyo color se separa del fondo de la piscina (no depende
-de forma ni tamaño, que cambian con la perspectiva). Ayudas opcionales: color naranja (el color no cambia
-con la perspectiva) y círculos tipo moneda (apagado por defecto: frágil en perspectiva). Todos se muestran
-como "OBJETO".
+Objetos de la competencia (confirmado 22 oct): CUBOS y PIRÁMIDES NARANJAS. Desde arriba ambos se ven como
+un cuadrado naranja (la pirámide con caras de distinto brillo), así que el detector principal es por COLOR
+NARANJA con filtros de forma suaves (no depende del tamaño ni de la perspectiva). Respaldo: GENÉRICO,
+cualquier mancha que se separa del fondo (por si el color cambia mucho bajo el agua). Círculos tipo moneda:
+apagado.
 
 La visión PROPONE candidatos; el piloto CONFIRMA (botón A / barra espaciadora). Los umbrales se
 ajustan en vivo (pestaña Visión) porque el color bajo el agua cambia con la luz y la profundidad.
@@ -20,8 +21,9 @@ import numpy as np
 DEFAULT_CFG: dict = {
     "ancho_trabajo": 640,
     "cuadros_estable": 6,  # cuadros seguidos para pasar de "visto" a "candidato"
-    "cubo": {"activo": True, "h_min": 2, "h_max": 25, "s_min": 110, "v_min": 60, "area_min": 120,
-             "solidez_min": 0.75, "aspecto_max": 2.5},
+    # naranja: rango amplio porque bajo el agua el naranja tira a amarillo/café y pierde saturación
+    "cubo": {"activo": True, "h_min": 0, "h_max": 30, "s_min": 90, "v_min": 50, "area_min": 80,
+             "solidez_min": 0.6, "aspecto_max": 3.0},
     "moneda": {"activo": False, "radio_min": 3, "radio_max": 40, "param2": 18, "contraste_min": 22},
     "generico": {"activo": True, "umbral": 25, "area_min": 60, "alargamiento_max": 4.0},
 }
@@ -42,7 +44,7 @@ TUNABLE = [
 CLASSES = {
     # clase: (etiqueta, color BGR, prioridad)
     # Todas se muestran como "OBJETO": la clase solo indica qué detector lo encontró.
-    "cubo": ("OBJETO", (0, 140, 255), 3),
+    "cubo": ("OBJETO NARANJA", (0, 140, 255), 3),
     "moneda": ("OBJETO", (0, 215, 255), 2),
     "generico": ("OBJETO", (255, 80, 255), 1),
 }

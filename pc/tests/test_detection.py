@@ -29,6 +29,16 @@ def test_cube_detected():
     assert "cubo" in run(3.0, 0.8, 1.0)
 
 
+def test_pyramid_detected_as_orange():
+    # pirámide vista desde arriba: cuadrado con caras de distinto brillo -> una sola detección naranja
+    found = run(8.0, -1.8, 1.0)
+    assert found == {"cubo"}
+
+
+def test_orange_far_from_bottom():
+    assert "cubo" in run(3.0, 0.8, 0.3)  # más lejos del fondo: objeto más pequeño
+
+
 def test_coins_detected_close_to_bottom():
     # por defecto las monedas salen como objeto genérico
     assert run(2.1, -0.45, 1.5) == {"generico"}

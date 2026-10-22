@@ -51,13 +51,13 @@
     "cuadros_estable": 6,
     "cubo": {
       "activo": true,
-      "h_min": 2,
-      "h_max": 25,
-      "s_min": 110,
-      "v_min": 60,
-      "area_min": 120,
-      "solidez_min": 0.75,
-      "aspecto_max": 2.5
+      "h_min": 0,
+      "h_max": 30,
+      "s_min": 90,
+      "v_min": 50,
+      "area_min": 80,
+      "solidez_min": 0.6,
+      "aspecto_max": 3.0
     },
     "moneda": {
       "activo": false,
