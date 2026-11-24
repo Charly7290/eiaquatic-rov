@@ -1,0 +1,44 @@
+# Productos desarrollados — EIAquatic ROV (Reto AquaBot USB 2026)
+
+Versión registrada: **v1.0**, la usada en la competencia del 22 de octubre de 2026 ([etiqueta `v1.0`](https://github.com/Charly7290/eiaquatic-rov/tree/v1.0)).
+
+| # | Producto | Ubicación | Software y formato |
+|---|---|---|---|
+| 1 | Firmware de control del ROV | [`firmware/`](../firmware/) | C++ (Arduino / PlatformIO para ESP32): `.cpp`, `.h`, `.ini` |
+| 2 | Estación de pilotaje EIAquatic | [`pc/`](../pc/) | Python (pygame, OpenCV): `.py`, `.json` |
+| 3 | Módulo de visión artificial | [`pc/aquabot_pc/detection.py`](../pc/aquabot_pc/detection.py) | Python (OpenCV): `.py`, `.json` |
+| 4 | Protocolo de comunicación RS-485 | [`docs/protocolo.md`](protocolo.md) | C++ y Python: `.h`, `.cpp`, `.py`, `.md` |
+| 5 | Simulador del ROV | [`pc/aquabot_pc/sim.py`](../pc/aquabot_pc/sim.py) | Python: `.py` |
+| 6 | Herramientas de integración y pruebas | [`firmware/test_host/`](../firmware/test_host/), [`firmware/src/main_bringup.cpp`](../firmware/src/main_bringup.cpp), [`pc/tests/`](../pc/tests/) | C++ (PlatformIO), Python (pytest): `.cpp`, `.py`, `Makefile` |
+
+## 1. Firmware de control del ROV
+Programa embebido que corre en la ESP32 del ROV y controla todo el vehículo en tiempo real. Lee los sensores (IMU, temperatura y voltaje), estabiliza el cabeceo con un PID, mueve el lastre con control en cascada y maneja los 6 motores. Incluye seguridad: armado, failsafe por pérdida de enlace y protección del lastre. Recibe órdenes de la Estación de pilotaje EIAquatic mediante el Protocolo de comunicación RS-485.
+
+## 2. Estación de pilotaje EIAquatic
+Aplicación de escritorio para pilotar el ROV desde la superficie con mando o teclado. Muestra el video de la cámara, la telemetría (profundidad, actitud, batería, lastre y motores) y pestañas para ajustar parámetros sin abrir el ROV. Graba video, telemetría y eventos con hora exacta como evidencia. Integra el Módulo de visión artificial y se comunica con el Firmware mediante el Protocolo RS-485.
+
+## 3. Módulo de visión artificial
+Software de detección de objetos en el video submarino, enfocado en los cubos y pirámides naranjas de la competencia. Identifica los objetos por color y forma, los sigue entre cuadros y los propone como candidatos; el piloto confirma el hallazgo, que queda registrado con hora, foto y marca en el video. Funciona dentro de la Estación de pilotaje EIAquatic y sus umbrales se ajustan en vivo.
+
+## 4. Protocolo de comunicación RS-485
+Protocolo binario propio para comunicar la estación en superficie con el ROV por un cable de ~40 m. Usa tramas cortas con verificación CRC16, envía 40 comandos por segundo con redundancia contra el ruido de los motores y recibe telemetría 10 veces por segundo. Permite leer y guardar 23 parámetros del ROV en caliente. Conecta el Firmware de control con la Estación de pilotaje EIAquatic.
+
+## 5. Simulador del ROV
+Simulación del ROV con física simplificada y una piscina sintética con objetos, que reproduce la lógica del Firmware de control (armado, failsafe, control de cabeceo y de profundidad, lastre). Permite entrenar al piloto y probar la Estación de pilotaje EIAquatic y el Módulo de visión artificial sin hardware ni agua.
+
+## 6. Herramientas de integración y pruebas
+Conjunto de programas para poner en marcha y validar el ROV. Incluye un firmware de puesta en marcha para probar sensores, motores y lastre paso a paso, y pruebas automáticas que verifican que el Firmware de control y la Estación de pilotaje EIAquatic usan exactamente el mismo protocolo. También incluye un barrido de robustez del control de profundidad.
+
+## Problemas conocidos y lecciones aprendidas
+
+**Firmware de control.** Durante las pruebas apareció un error que desarmaba el ROV al azar, causado por una resta sin signo en el control del tiempo entre comandos; se corrigió, pero dejó claro que cada cambio debe probarse con el ROV real y no solo en el computador. El sensor de presión, ubicado fuera del casco, se dañó con agua y, al compartir el bus I2C con la IMU, dejó ambos sensores sin lectura el día de la competencia, por lo que en una próxima versión cualquier sensor externo debería ir en un bus independiente. Los finales de carrera del lastre quedaron cableados como normalmente abiertos, lo que impide detectar un cable suelto; se recomienda cablearlos como normalmente cerrados, aunque el firmware ya tolera que ambos se activen a la vez. Además, varios valores quedan fijos al compilar (sentido de los motores, orientación de la IMU, velocidad del enlace), así que convendría convertirlos en parámetros ajustables desde la estación, porque no se pueden corregir con el ROV sellado. Quien lo use debe programar la ESP32 con la batería desconectada, ya que los pines de arranque compartidos con los drivers pueden impedir la carga del firmware.
+
+**Estación de pilotaje.** El adaptador RS-485 y la ESP32 usan el mismo chip USB, y el sistema operativo los confundía; se resolvió identificando cada dispositivo por su puerto físico, por lo que deben conectarse siempre en el mismo puerto del computador. Las pruebas también mostraron que algunos indicadores confundían al piloto: el indicador de enlace marcaba error ante cualquier trama dañada y se cambió por el porcentaje real de pérdida, y el horizonte artificial, que seguía la convención de aviación, se cambió a una vista desde atrás del ROV. El mando no se probó con anticipación, por lo que se recomienda verificar mando, cámara y grabación al menos un día antes de usar el sistema. La configuración local (puerto, cámara y umbrales de visión) se guarda en un archivo de configuración, cuya velocidad de comunicación debe coincidir con la del firmware.
+
+**Visión artificial.** Bajo el agua el color naranja se ve más amarillo y menos saturado, de modo que los umbrales calibrados en tierra no sirven directamente; es indispensable calibrarlos con video real de la piscina antes de competir. El detector genérico, que reconoce cualquier objeto distinto del fondo, generaba falsos positivos con las líneas del carril, las sombras y los desagües, por lo que quedó solo como respaldo del detector de color. El detector de monedas por forma circular se descartó por su baja confiabilidad en perspectiva. Quien lo use debe tener presente que la marca válida para el puntaje es la confirmación del piloto, con hora, fotografía y registro, y que la detección automática solo lo asiste. La cámara va montada invertida y la imagen se rota por configuración.
+
+**Protocolo RS-485.** El principal problema fue el ruido eléctrico de los motores, que provocaba pérdida de tramas y desarmes a través del cable de unos 35 metros. Lo que más ayudó fue poner resistencias de terminación de 120 Ω en ambos extremos, agregar resistencias de polarización de 330 Ω en un extremo (los valores típicos de 560 a 680 Ω no alcanzan con alimentación de 3,3 V), reducir la velocidad a 38 400 baudios y enviar los comandos con redundancia, 40 veces por segundo. Bajar la frecuencia del PWM de los motores a 5 kHz, en cambio, empeoró la situación. También se encontró que la lectura del sensor de temperatura bloqueaba el microcontrolador cerca de 25 ms y retrasaba las respuestas, lo que se resolvió optimizando esa lectura. En una próxima versión convendría llevar un hilo de tierra de referencia por el cable y atender el enlace en un núcleo dedicado de la ESP32. La velocidad y el formato de las tramas deben ser idénticos en el firmware y en la estación, o no habrá comunicación.
+
+**Simulador.** El simulador usa una física simplificada y no reproduce el ruido eléctrico, los reflejos del agua, la deriva de los sensores ni la flotabilidad real, así que sirve para validar la lógica del software y entrenar al piloto, pero no para ajustar con precisión las ganancias de control. Debe actualizarse cada vez que cambia el firmware; de lo contrario deja de representar el comportamiento real del ROV. La lección más importante es que los problemas que aparecieron en la competencia fueron eléctricos y el simulador no podía detectarlos, por lo que nunca reemplaza las pruebas con el hardware completo.
+
+**Herramientas de integración y pruebas.** Las pruebas automáticas verifican el protocolo y la lógica de control, pero no detectan fallas eléctricas como tierras mal conectadas, ruido o cables flojos, que fueron las que más tiempo costaron. El programa de puesta en marcha muestra los ángulos de la IMU sin las compensaciones de montaje, lo que debe tenerse en cuenta al interpretarlo, y la caracterización del lastre debe hacerse con agua y con el voltaje real de la batería. La principal lección es que varios problemas aparecieron por primera vez el día de la competencia; por eso se recomienda hacer, varios días antes, una prueba integral con el ROV sellado, el cable completo y los motores al máximo, siguiendo una lista de verificación previa al sellado.

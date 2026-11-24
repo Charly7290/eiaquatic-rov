@@ -1,6 +1,23 @@
-# AquaBot USB 2026 — Software
+# EIAquatic ROV — Software (Reto AquaBot USB 2026)
 
-Firmware de la ESP32 (ROV) y app de piloteo del PC. Diseño completo en `docs/diseno_software.md`.
+Software del ROV **EIAquatic** del equipo de la Universidad EIA para el Reto AquaBot USB 2026 (Medellín, 22 de octubre de 2026): firmware de la ESP32 del vehículo y estación de pilotaje en el PC.
+
+- Diseño del software: [`docs/diseno_software.md`](docs/diseno_software.md)
+- Protocolo de comunicación: [`docs/protocolo.md`](docs/protocolo.md)
+- Productos desarrollados y dónde está cada uno: [`docs/productos.md`](docs/productos.md)
+
+**Versión de competencia:** etiqueta [`v1.0`](https://github.com/Charly7290/eiaquatic-rov/tree/v1.0).
+
+## Productos
+
+| Producto | Ubicación | Tecnología |
+|---|---|---|
+| Firmware de control del ROV | [`firmware/`](firmware/) | C++ · PlatformIO · ESP32 |
+| Estación de pilotaje EIAquatic (interfaz) | [`pc/`](pc/) | Python · pygame · OpenCV |
+| Módulo de visión artificial | [`pc/aquabot_pc/detection.py`](pc/aquabot_pc/detection.py) | Python · OpenCV |
+| Protocolo de comunicación RS-485 | [`docs/protocolo.md`](docs/protocolo.md) | C++ y Python |
+| Simulador del ROV | [`pc/aquabot_pc/sim.py`](pc/aquabot_pc/sim.py) | Python |
+| Herramientas de integración y pruebas | [`firmware/test_host/`](firmware/test_host/), [`firmware/src/main_bringup.cpp`](firmware/src/main_bringup.cpp), [`pc/tests/`](pc/tests/) | C++ · Python · pytest |
 
 ```
 aquabot_software/

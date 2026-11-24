@@ -207,7 +207,7 @@ PARAMS: list[ParamInfo] = [
     ParamInfo(11, "BALLAST_STROKE", 14.5, 1.0, 120.0, 0.5, "s", "Lastre: tiempo de carrera completa"),
     ParamInfo(12, "BALLAST_TIMEOUT", 27.0, 2.0, 240.0, 1.0, "s", "Lastre: marcha continua máxima"),
     ParamInfo(13, "LOWBAT_WARN", 10.5, 6.0, 13.0, 0.1, "V", "Batería: aviso"),
-    ParamInfo(14, "LOWBAT_CRIT", 9.9, 6.0, 13.0, 0.1, "V", "Batería: crítica (empuje al 40 %)"),
+    ParamInfo(14, "LOWBAT_CRIT", 9.9, 6.0, 13.0, 0.1, "V", "Batería: aviso crítico"),
     ParamInfo(15, "SURFACE_LINKLOSS", 15.0, 1.0, 300.0, 1.0, "s", "Emerger tras perder el enlace"),
     ParamInfo(16, "SURFACE_LOWBAT", 10.0, 1.0, 300.0, 1.0, "s", "Sin uso (no hay emersión por batería)"),
     ParamInfo(17, "WATER_DENSITY", 997.0, 990.0, 1030.0, 1.0, "kg/m³", "Densidad del agua"),
